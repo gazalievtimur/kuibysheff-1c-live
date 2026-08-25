@@ -6,4 +6,4 @@
 
 - Platform help MCP (`sntx_sem`)
 - code-index against product CF
-- Optional bsl-language-server MCP
+- `bsl-language-server` MCP (`analyze` on `out/src`)

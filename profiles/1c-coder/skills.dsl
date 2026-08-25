@@ -1,10 +1,10 @@
 skill "workspace" {
-  policy: "Read plan inputs; write sources only under out/. home.run limited to read-only git/rg when configured."
+  policy: "Read plan inputs; write sources only under out/. One home.write per turn (one file per iteration). home.run limited to read-only git/rg when configured."
   allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
 }
 
 skill "platform_help" {
-  policy: "Platform help for BSL/metadata questions. Read-only."
+  policy: "REQUIRED before writing BSL or extension directives: call sntx_sem.search_bsl_syntax or sntx_sem.search_help at least once, then get_topic if needed. Do not invent platform syntax or directive semantics."
   allowed_tools: [
     "sntx_sem.search_help",
     "sntx_sem.search_bsl_syntax",
@@ -14,7 +14,7 @@ skill "platform_help" {
 }
 
 skill "code_index" {
-  policy: "Read/search CF dump. Do not invent symbols."
+  policy: "Read/search CF dump. Every call must pass repo=cf. Use find_symbol with name=. Do not invent symbols."
   allowed_tools: [
     "code-index.search",
     "code-index.find_symbol",
@@ -28,10 +28,12 @@ skill "code_index" {
 }
 
 skill "bsl_lint" {
-  policy: "Analyze BSL when bsl-language-server MCP is available."
+  policy: "REQUIRED after writing BSL under out/src: call bsl-language-server.analyze with absolute srcDir from in/bsl-lint.json. Fix diagnostics before done=true."
   allowed_tools: [
     "bsl-language-server.analyze",
-    "bsl_language_server.analyze"
+    "bsl-language-server.version",
+    "bsl_language_server.analyze",
+    "bsl_language_server.version"
   ]
 }
 

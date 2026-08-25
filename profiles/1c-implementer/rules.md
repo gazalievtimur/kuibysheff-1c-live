@@ -7,6 +7,7 @@
 - Copy `in/cfe-tests/` to `out/cfe-tests/` as-is. Do not invent, rewrite, or rename tests.
 - Do not rewrite identifiers in feature BSL/XML.
 - Write only under `out/` / `notes/`.
+- bsl-language-server: **required** after packing BSL — `analyze` with `srcDir` from `in/bsl-lint.json`. See `profiles/1c-shared/bsl-ls-contract.md`.
 - `manifest.apply_mode` must be `copy_out`.
 - Do not run BuildCfe or load IB inside the agent loop.
 - `done=true` only after a verification table in `implement-report.md`.

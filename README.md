@@ -13,6 +13,7 @@ Independent example repo — use it to learn CLI orchestration with 1C MCP tooli
 - Provider API key (`OPENAI_API_KEY` by default)
 - `SNTX_SEM_CONFIG` — path to `1c-sntx-sem` `config.yaml`
 - `BSL_INDEXER` or `CODE_INDEX_BIN` — path to `bsl-indexer`
+- `BSL_LS_MCP` + `BSL_LS_JAR` (+ `JAVA_HOME`) — BSL Language Server MCP as in ЗУП (required for yaxunit/coder/implementer)
 - Optional: `SNTX_SEM_PYTHON`, 1C platform/`ibcmd` (`-RequirePlatform`)
 
 `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1` is set by the launcher (stdio MCP + venv).
@@ -21,7 +22,7 @@ Independent example repo — use it to learn CLI orchestration with 1C MCP tooli
 
 ```powershell
 Copy-Item .\.env.example .\.env
-# set OPENAI_API_KEY, SNTX_SEM_CONFIG, BSL_INDEXER
+# set OPENAI_API_KEY, SNTX_SEM_CONFIG, BSL_INDEXER, BSL_LS_MCP, BSL_LS_JAR
 
 .\harness\run.ps1 -DryRun
 .\scripts\1c-live-regression.ps1

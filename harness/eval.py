@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -266,26 +267,195 @@ def _resolve_mcp_paths(repo_root: Path) -> tuple[str, str, str]:
     return sntx, indexer, sntx_py
 
 
+def _resolve_bsl_ls() -> tuple[str, str, str, str]:
+    """Return (node, server_js, jar, java_home) for bsl-language-server MCP (ЗУП-style)."""
+    node = (
+        os.environ.get("BSL_LS_NODE", "").strip()
+        or shutil.which("node")
+        or ""
+    )
+    server_js = (
+        os.environ.get("BSL_LS_MCP", "").strip()
+        or os.environ.get("BSL_LS_SERVER", "").strip()
+    )
+    jar = os.environ.get("BSL_LS_JAR", "").strip()
+    java_home = os.environ.get("JAVA_HOME", "").strip()
+
+    if not server_js:
+        for candidate in (
+            Path.home() / ".claude" / "bsl-ls-mcp" / "server.js",
+            Path(r"C:\Users") / os.environ.get("USERNAME", "") / ".claude" / "bsl-ls-mcp" / "server.js",
+        ):
+            if candidate.is_file():
+                server_js = str(candidate)
+                break
+    if not jar:
+        candidates: list[Path] = [
+            Path.home() / ".claude" / "bsl-ls" / "bsl-language-server.jar",
+        ]
+        if server_js:
+            candidates.append(
+                Path(server_js).resolve().parent.parent / "bsl-ls" / "bsl-language-server.jar"
+            )
+        for candidate in candidates:
+            if candidate.is_file():
+                jar = str(candidate)
+                break
+
+    if not node or not Path(node).is_file():
+        raise SystemExit(
+            "Node.js required for bsl-language-server MCP "
+            "(set BSL_LS_NODE or put node on PATH)."
+        )
+    if not server_js or not Path(server_js).is_file():
+        raise SystemExit(
+            "BSL_LS_MCP / BSL_LS_SERVER is required "
+            "(path to bsl-ls-mcp/server.js, as in the ЗУП project)."
+        )
+    if not jar or not Path(jar).is_file():
+        raise SystemExit(
+            "BSL_LS_JAR is required (path to bsl-language-server exec jar)."
+        )
+    return node, server_js, jar, java_home
+
+
+def _code_index_home(indexer: str) -> Path:
+    env = os.environ.get("CODE_INDEX_HOME", "").strip()
+    if env:
+        return Path(env)
+    return Path(indexer).resolve().parent
+
+
+def _daemon_toml_tracks(daemon_toml: Path, cf_root: Path) -> bool:
+    if not daemon_toml.is_file():
+        return False
+    text = daemon_toml.read_text(encoding="utf-8")
+    target = str(cf_root.resolve())
+    # Compare both raw and escaped Windows forms.
+    variants = {
+        target,
+        target.replace("\\", "/"),
+        target.replace("\\", "\\\\"),
+    }
+    return any(v in text for v in variants)
+
+
+def _ensure_code_index_tracks(indexer: str, cf_root: Path) -> None:
+    """Register CF in code-index daemon.toml and reload so MCP serve can query it.
+
+    bsl-indexer `serve` is a transport over the running daemon; untracked paths
+    return status=not_started even when `repo` is correct.
+    """
+    cf_root = cf_root.resolve()
+    home = _code_index_home(indexer)
+    daemon_toml = home / "daemon.toml"
+    tracked = _daemon_toml_tracks(daemon_toml, cf_root)
+    if not tracked:
+        block = (
+            "\n[[paths]]\n"
+            f'path = "{str(cf_root).replace(chr(92), chr(92) * 2)}"\n'
+            'language = "bsl"\n'
+        )
+        if daemon_toml.is_file():
+            existing = daemon_toml.read_text(encoding="utf-8")
+            if not existing.endswith("\n"):
+                existing += "\n"
+            daemon_toml.write_text(existing + block, encoding="utf-8")
+        else:
+            home.mkdir(parents=True, exist_ok=True)
+            daemon_toml.write_text(
+                "[daemon]\nhttp_port = 0\nmax_concurrent_initial = 1\n" + block,
+                encoding="utf-8",
+            )
+        print(f"code-index: added {cf_root} to {daemon_toml}", flush=True)
+
+    idx = Path(indexer)
+    # Reload if daemon is up; otherwise one-shot index is still useful for CLI,
+    # but MCP serve needs the daemon — surface a clear hint on failure.
+    reload = subprocess.run(
+        [str(idx), "daemon", "reload"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if reload.returncode != 0:
+        # Best-effort: try starting is out of scope; ask the operator.
+        status = subprocess.run(
+            [str(idx), "daemon", "status"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        hint = (reload.stderr or reload.stdout or status.stdout or "").strip()
+        raise RuntimeError(
+            "code-index daemon did not reload after registering CF. "
+            f"Start/reload the daemon (CODE_INDEX_HOME={home}). Details:\n{hint}"
+        )
+
+    # Wait until the path shows in daemon status (initial index may take a moment).
+    needle = str(cf_root)
+    deadline = time.time() + 120
+    last = ""
+    while time.time() < deadline:
+        status = subprocess.run(
+            [str(idx), "daemon", "status"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        last = status.stdout or status.stderr or ""
+        # Daemon prints \\?\C:\... — plain absolute path is still a substring.
+        if needle in last or needle.replace("\\", "/") in last:
+            print(f"code-index: tracked {cf_root}", flush=True)
+            return
+        time.sleep(1.5)
+    raise RuntimeError(
+        f"code-index daemon did not report {cf_root} within 120s.\n{last}"
+    )
+
+
 def _write_stage_config(
     path: Path,
     *,
     base_text: str,
     log_dir: Path,
     cf_root: Path,
+    cf_index_root: Path,
     sntx_config: str,
     indexer: str,
     sntx_python: str,
     include_searxng: bool,
+    bsl_ls: tuple[str, str, str, str] | None = None,
+    stage_name: str = "",
 ) -> None:
     provider_base_url = _yaml_scalar(base_text, "base_url", "https://api.openai.com/v1")
     provider_model = _yaml_scalar(base_text, "model", "gpt-4o")
     provider_api_key_env = _yaml_scalar(base_text, "api_key_env", "OPENAI_API_KEY")
     provider_timeout_ms = _yaml_scalar(base_text, "timeout_ms", "180000")
     max_iterations = _yaml_scalar(base_text, "max_iterations", "80")
-    max_tokens = _yaml_scalar(base_text, "max_tokens", "500000")
+    max_tokens = _yaml_scalar(base_text, "max_tokens", "800000")
     max_duration_sec = _yaml_scalar(base_text, "max_duration_sec", "2400")
+    # analyst/coder often burn tokens on MCP + multi-file writes; give extra headroom.
+    if stage_name in ("analyst", "coder"):
+        try:
+            if int(max_tokens) < 800_000:
+                max_tokens = "800000"
+        except ValueError:
+            max_tokens = "800000"
+        try:
+            if int(max_iterations) < 100:
+                max_iterations = "100"
+        except ValueError:
+            max_iterations = "100"
 
     cf_s = _escape_yaml_dq(str(cf_root.resolve()).replace("\\", "/"))
+    cf_index_s = _escape_yaml_dq(str(cf_index_root.resolve()).replace("\\", "/"))
     log_s = _escape_yaml_dq(str(log_dir.resolve()).replace("\\", "/"))
     sntx_s = _escape_yaml_dq(sntx_config.replace("\\", "/"))
     idx_s = _escape_yaml_dq(indexer.replace("\\", "/"))
@@ -319,6 +489,25 @@ def _write_stage_config(
     timeout_ms: 60000
 """
 
+    bsl_block = ""
+    if bsl_ls is not None:
+        node_bin, server_js, jar, java_home = bsl_ls
+        node_s = _escape_yaml_dq(str(Path(node_bin).resolve()).replace("\\", "/"))
+        js_s = _escape_yaml_dq(str(Path(server_js).resolve()).replace("\\", "/"))
+        jar_s = _escape_yaml_dq(str(Path(jar).resolve()).replace("\\", "/"))
+        java_env = ""
+        if java_home and Path(java_home).is_dir():
+            jh = _escape_yaml_dq(str(Path(java_home).resolve()).replace("\\", "/"))
+            java_env = f'\n      JAVA_HOME: "{jh}"'
+        bsl_block = f"""
+  - name: "bsl-language-server"
+    command: "{node_s}"
+    args: ["{js_s}"]
+    env:
+      BSL_LS_JAR: "{jar_s}"{java_env}
+    timeout_ms: 180000
+"""
+
     program_lines: list[str] = []
     for name in ("rg", "git"):
         found = shutil.which(name)
@@ -350,9 +539,9 @@ mcp:
 
   - name: "code-index"
     command: "{idx_s}"
-    args: ["serve", "--path", "{cf_s}"]
+    args: ["serve", "--path", "cf={cf_index_s}"]
     timeout_ms: 60000
-{searx}
+{bsl_block}{searx}
 limits:
   max_iterations: {max_iterations}
   max_tokens: {max_tokens}
@@ -661,11 +850,16 @@ def _stage_prompt(stage: str, product_id: str, expect: dict[str, Any] | None = N
         return (
             preamble
             + f"Подготовь утверждаемый план доработки в расширении для product={product_id}.\n"
-            "Read in/task_brief.md and in/product.json. Research CF via code-index and sntx_sem.\n"
+            "Read in/task_brief.md and in/product.json. Research CF via code-index "
+            "(always pass repo=cf) and sntx_sem (required: search_bsl_syntax or "
+            "search_help, then get_topic).\n"
             f"{extra}"
             "Write prd.md, architecture.md, tasks.md (labels bsl|metadata|cfe_packaging), "
             "cfe-scope.md, workflow-state.md (verification table), "
             "manifest.json (apply_mode=none).\n"
+            "Write at most ONE file per turn (home.write once). Never batch multiple "
+            "plan files in a single JSON response — large replies fail to parse.\n"
+            "Finish required deliverables (cfe-scope.md, manifest.json) before optional notes.\n"
             "Return JSON only on every turn."
         )
     if stage == "yaxunit":
@@ -673,6 +867,9 @@ def _stage_prompt(stage: str, product_id: str, expect: dict[str, Any] | None = N
             preamble
             + "Write YAxUnit tests for the approved plan. Read in/docs/ first "
             "(public YAxUnit snapshot). Read in/prd.md, in/tasks.md, in/cfe-scope.md. "
+            "Before platform BSL in tests, call sntx_sem.search_bsl_syntax or search_help. "
+            "After writing tests, call bsl-language-server.analyze with srcDir from "
+            "in/bsl-lint.json (absolute paths). "
             "Do not implement the feature. Tests must fail on the baseline CF.\n"
             f"{gate_line}"
             "Write out/tests/, out/cfe-tests/, test-report.md (cite docs URLs + verification table), "
@@ -683,9 +880,16 @@ def _stage_prompt(stage: str, product_id: str, expect: dict[str, Any] | None = N
             preamble
             + "Implement approved bsl/metadata steps from in/tasks.md into out/src/.\n"
             "Read in/agreements.md and in/tests/ so the change satisfies the YAxUnit tests. "
+            "Before writing BSL/directives, call sntx_sem.search_bsl_syntax or search_help "
+            "(then get_topic if needed). After writing sources, call "
+            "bsl-language-server.analyze with srcDir from in/bsl-lint.json. "
             "Do not rename tests. Skip cfe_packaging. Write code-report.md "
             "(verification table), files-index.md, "
-            "manifest.json (apply_mode=none). Return JSON only on every turn."
+            "manifest.json (apply_mode=none).\n"
+            "Write at most ONE file per turn (home.write once). Never batch multiple "
+            "source files in a single JSON response — large replies fail to parse.\n"
+            "Write code-report.md last, after out/src is complete.\n"
+            "Return JSON only on every turn."
         )
     return (
         preamble
@@ -933,6 +1137,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     sntx_config, indexer, sntx_python = _resolve_mcp_paths(repo_root)
     agent_bin = _agent_bin(repo_root, args.agent_bin or None)
+    try:
+        bsl_ls = _resolve_bsl_ls()
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    try:
+        _ensure_code_index_tracks(indexer, cf_dir)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     try:
         task_paths = _load_tasks(bank_dir, args.task_id, args.all)
@@ -1003,12 +1218,17 @@ def main(argv: Optional[list[str]] = None) -> int:
                     base_text=base_text,
                     log_dir=log_dir,
                     cf_root=cf_copy,
+                    cf_index_root=cf_dir,
                     sntx_config=sntx_config,
                     indexer=indexer,
                     sntx_python=sntx_python,
                     include_searxng=bool(
                         args.with_searxng and stage_name in ("analyst", "yaxunit")
                     ),
+                    bsl_ls=bsl_ls
+                    if stage_name in ("yaxunit", "coder", "implementer")
+                    else None,
+                    stage_name=stage_name,
                 )
 
                 if stage_name == "analyst":
@@ -1019,6 +1239,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "id": "sklad",
                         "name": "Склад",
                         "cf_root": str(cf_copy),
+                        "code_index_repo": "cf",
+                        "code_index_root": str(cf_dir),
                         "task_id": task_id,
                     }
                     (home_dir / "in" / "product.json").write_text(
@@ -1037,6 +1259,20 @@ def main(argv: Optional[list[str]] = None) -> int:
                         (home_dir / "in" / "task_brief.md").write_text(
                             brief, encoding="utf-8"
                         )
+                    (home_dir / "in" / "bsl-lint.json").write_text(
+                        json.dumps(
+                            {
+                                "tool": "bsl-language-server.analyze",
+                                "src_dirs": [
+                                    str((home_dir / "out" / "tests").resolve()),
+                                    str((home_dir / "out" / "cfe-tests").resolve()),
+                                ],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
                 elif stage_name == "coder":
                     analyst_out = stage_homes["analyst"] / "out"
                     _copy_dir_contents(analyst_out, home_dir / "in")
@@ -1044,6 +1280,19 @@ def main(argv: Optional[list[str]] = None) -> int:
                     yax_home = stage_homes.get("yaxunit")
                     if yax_home is not None:
                         _copy_tests_for_coder(yax_home, home_dir / "in" / "tests")
+                    (home_dir / "in" / "bsl-lint.json").write_text(
+                        json.dumps(
+                            {
+                                "tool": "bsl-language-server.analyze",
+                                "src_dirs": [
+                                    str((home_dir / "out" / "src").resolve()),
+                                ],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
                 elif stage_name == "implementer":
                     analyst_out = stage_homes["analyst"] / "out"
                     coder_out = stage_homes["coder"] / "out"
@@ -1064,6 +1313,20 @@ def main(argv: Optional[list[str]] = None) -> int:
                         cfe_tests = yax_home / "out" / "cfe-tests"
                         if cfe_tests.is_dir():
                             _copy_tree(cfe_tests, home_dir / "in" / "cfe-tests")
+                    (home_dir / "in" / "bsl-lint.json").write_text(
+                        json.dumps(
+                            {
+                                "tool": "bsl-language-server.analyze",
+                                "src_dirs": [
+                                    str((home_dir / "out" / "cfe").resolve()),
+                                    str((home_dir / "out" / "cfe-tests").resolve()),
+                                ],
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
 
                 analyst_agreements = None
                 if stage_name != "analyst":

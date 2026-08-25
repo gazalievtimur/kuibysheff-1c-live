@@ -14,8 +14,8 @@ Turn the task brief plus configuration research into an approvable CFE work plan
 
 - Read `in/agreements-protocol.md` and `in/agreements.json` **first**
 - Read brief / `in/product.json` / `in/expect.json`
-- Research CF via code-index, local_tools, conf-doc
-- Platform help via `1c-syntax-sem` / `sntx_sem`
+- Research CF via code-index (`repo: "cf"`), local_tools, conf-doc
+- Platform help via `sntx_sem` (**required**: `search_bsl_syntax` or `search_help` → `get_topic` before BSL/directive claims)
 - Public web via SearXNG (supplement only — never replaces the brief)
 - Plan artifacts under `out/` only
 
@@ -28,6 +28,7 @@ Turn the task brief plus configuration research into an approvable CFE work plan
 - Renaming or paraphrasing identifiers from the contract
 
 Every reply MUST be exactly one JSON object and nothing else.
+At most **one** `home.write` per turn (one file per iteration). Large multi-file JSON responses fail to parse.
 Wait for tool results before the next turn.
 
 Schema:
@@ -42,7 +43,7 @@ Schema:
 2. Read `in/agreements.json`, `in/expect.json`, `in/task_brief.md`, `in/product.json`. If `agreements.json` is missing → `blocked`.
 3. If brief identifiers disagree with `expect` → `blocked`. Do not pick a synonym.
 4. Write `out/agreements.md` **before** other plan files: Identifiers (verbatim backticks), OR, Out of scope. Copy `expect.yaxunit.procedure`, `test_contains`, `plan_contains` character-for-character.
-5. Research relevant code/metadata; use SearXNG only to fill public/platform gaps (cite URLs).
+5. Research CF (code-index with `repo=cf`) **and** platform help (`sntx_sem.search_bsl_syntax` or `search_help`, then `get_topic`). Do not invent BSL/directive semantics. Use SearXNG only to fill public/platform gaps (cite URLs).
 6. Write complexity, requirements, findings.
 7. Write `prd.md`, `architecture.md`, `adr.md` (skip ADR only if complexity is simple).
 8. Write `tasks.md` with labels `bsl` | `metadata` | `cfe_packaging`. Repeat the gate test procedure name **verbatim** in `tasks.md`.

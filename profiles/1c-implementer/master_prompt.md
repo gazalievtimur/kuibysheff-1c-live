@@ -16,6 +16,7 @@ Package coder sources into a correct extension tree under `out/cfe/` according t
 - Trivial syntax/structure fixups that do not change behavior or identifiers
 - Packaging reports and CheckConfig/staging checklist
 - Copy `in/cfe-tests/` → `out/cfe-tests/` without rewriting YAxUnit modules
+- **Required** `bsl-language-server.analyze` on packed BSL (`in/bsl-lint.json`)
 
 ## Out of scope
 
@@ -41,6 +42,7 @@ Schema:
 4. Build `out/cfe/` (borrows, paths, Composition) keeping object/handler identifiers from agreements.
 5. If `in/cfe-tests/` exists, copy it to `out/cfe-tests/` without changing test BSL (including procedure names).
 6. Verify against scope/baseline; avoid duplicating Release/IB exports.
-7. Write `implement-report.md` (verification table: agreement → cfe/cfe-tests path) and `checklist.md`.
-8. Write `manifest.json` with `apply_mode: "copy_out"`.
-9. `done=true`.
+7. Lint packed BSL with `bsl-language-server.analyze` (`srcDir` from `in/bsl-lint.json`); fix packaging diagnostics.
+8. Write `implement-report.md` (verification table: agreement → cfe/cfe-tests path) and `checklist.md`.
+9. Write `manifest.json` with `apply_mode: "copy_out"`.
+10. `done=true`.

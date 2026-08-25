@@ -20,7 +20,7 @@ mcp:
 
   - name: "code-index"
     command: "REQUIRED_BSL_INDEXER"
-    args: ["serve", "--path", "../../../src/cf"]
+    args: ["serve", "--path", "cf=../../../src/cf"]
     timeout_ms: 60000
 
   - name: "searxng"
@@ -29,8 +29,8 @@ mcp:
     timeout_ms: 60000
 
 limits:
-  max_iterations: 80
-  max_tokens: 500000
+  max_iterations: 100
+  max_tokens: 800000
   max_duration_sec: 2400
 
 logging:

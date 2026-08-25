@@ -38,10 +38,23 @@ workflows/1c-live/
 | `SNTX_SEM_CONFIG` | Path to `1c-sntx-sem` `config.yaml` |
 | `SNTX_SEM_PYTHON` | Optional; defaults to `1c-sntx-sem/.venv/.../python` |
 | `BSL_INDEXER` / `CODE_INDEX_BIN` | Path to `bsl-indexer` |
+| `CODE_INDEX_HOME` | Optional; defaults to the directory of `bsl-indexer` (holds `daemon.toml`) |
+| `BSL_LS_MCP` / `BSL_LS_SERVER` | Path to `bsl-ls-mcp/server.js` (ЗУП-style Node MCP) |
+| `BSL_LS_JAR` | Path to `bsl-language-server-*-exec.jar` |
+| `JAVA_HOME` | Java 17+ for BSL-LS (optional if `java` is on PATH) |
 | Optional platform | `IBCMD_PATH` or install under `Program Files\1cv8` for `-RequirePlatform` |
 
 `run.ps1` / `run.sh` set `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1` by default so stdio MCP
-(`sntx_sem`, `code-index`) can start under the worker’s cleared child environment.
+(`sntx_sem`, `code-index`, `bsl-language-server`) can start under the worker’s cleared child environment.
+
+**code-index:** MCP `serve` is a transport over the running `bsl-indexer` daemon.
+Eval registers `harness/cf` in `daemon.toml` (alias `cf`) and reloads the daemon.
+Every `code-index.*` tool call must pass `"repo":"cf"` (kbshff also auto-fills
+`repo` when the server has a single `--path` alias).
+
+**bsl-language-server:** Wired on yaxunit / coder / implementer (tests are BSL too).
+After writing sources, agents must call `analyze` with absolute `srcDir` from
+`in/bsl-lint.json` (same Node+JAR layout as the ЗУП Cursor MCP).
 
 Profiles are imported from the sibling agent project:
 
@@ -83,6 +96,9 @@ Live gate (default task `cfe-qty-check-01`):
 ```powershell
 $env:SNTX_SEM_CONFIG = "C:\Git\1c-sntx-sem\config.yaml"
 $env:BSL_INDEXER = "C:\mcp\code-index\bsl-indexer.exe"
+$env:BSL_LS_MCP = "$env:USERPROFILE\.claude\bsl-ls-mcp\server.js"
+$env:BSL_LS_JAR = "$env:USERPROFILE\.claude\bsl-ls\bsl-language-server.jar"
+# JAVA_HOME already set on this machine for JDK 17+
 $env:OPENAI_API_KEY = "..."   # or provider api_key_env from config
 .\workflows\1c-live\run.ps1
 ```
@@ -96,6 +112,9 @@ $env:OPENAI_API_KEY = "..."   # or provider api_key_env from config
 ```bash
 export SNTX_SEM_CONFIG=/path/to/1c-sntx-sem/config.yaml
 export BSL_INDEXER=/path/to/bsl-indexer
+export BSL_LS_MCP=$HOME/.claude/bsl-ls-mcp/server.js
+export BSL_LS_JAR=$HOME/.claude/bsl-ls/bsl-language-server.jar
+export JAVA_HOME=/path/to/jdk-17+
 ./workflows/1c-live/run.sh
 ./workflows/1c-live/run.sh --all
 ./workflows/1c-live/run.sh --require-platform
