@@ -32,6 +32,9 @@ else {
 
 Set-Location $RepoRoot
 
+if (-not $env:PYTHONIOENCODING) {
+    $env:PYTHONIOENCODING = "utf-8"
+}
 if (-not $env:KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP) {
     $env:KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP = "1"
 }
@@ -54,8 +57,14 @@ if ($DryRun) {
 if (-not $AgentBin) {
     $resolveArgs = @{}
     if (-not $SkipBuild) { $resolveArgs.Build = $true }
-    $AgentBin = & (Join-Path $RepoRoot "scripts\resolve-kbshff.ps1") @resolveArgs
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($AgentBin)) {
+    $resolveExit = 0
+    try {
+        $AgentBin = & (Join-Path $RepoRoot "scripts\resolve-kbshff.ps1") @resolveArgs
+        if (Test-Path variable:/LASTEXITCODE) { $resolveExit = [int]$LASTEXITCODE }
+    } catch {
+        throw "Failed to resolve kbshff: $($_.Exception.Message)"
+    }
+    if ($resolveExit -ne 0 -or [string]::IsNullOrWhiteSpace(($AgentBin | Out-String).Trim())) {
         throw "Failed to resolve kbshff"
     }
     $AgentBin = ($AgentBin | Select-Object -Last 1).ToString().Trim()

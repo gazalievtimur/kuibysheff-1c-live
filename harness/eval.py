@@ -1193,7 +1193,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"PASS {task_id}")
         else:
             failed += 1
-            print(f"FAIL {task_id}: {failures}")
+            safe_failures = json.dumps(failures, ensure_ascii=True)
+            print(f"FAIL {task_id}: {safe_failures}")
 
     report = {
         "run_id": run_id,
