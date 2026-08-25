@@ -20,9 +20,9 @@ mcp:
     timeout_ms: 60000
 
 limits:
-  max_iterations: 30
-  max_tokens: 100000
-  max_duration_sec: 900
+  max_iterations: 80
+  max_tokens: 500000
+  max_duration_sec: 2400
 
 logging:
   enable_ai_log: true

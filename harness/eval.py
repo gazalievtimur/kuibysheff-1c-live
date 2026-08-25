@@ -281,9 +281,9 @@ def _write_stage_config(
     provider_model = _yaml_scalar(base_text, "model", "gpt-4o")
     provider_api_key_env = _yaml_scalar(base_text, "api_key_env", "OPENAI_API_KEY")
     provider_timeout_ms = _yaml_scalar(base_text, "timeout_ms", "180000")
-    max_iterations = _yaml_scalar(base_text, "max_iterations", "40")
-    max_tokens = _yaml_scalar(base_text, "max_tokens", "120000")
-    max_duration_sec = _yaml_scalar(base_text, "max_duration_sec", "1200")
+    max_iterations = _yaml_scalar(base_text, "max_iterations", "80")
+    max_tokens = _yaml_scalar(base_text, "max_tokens", "500000")
+    max_duration_sec = _yaml_scalar(base_text, "max_duration_sec", "2400")
 
     cf_s = _escape_yaml_dq(str(cf_root.resolve()).replace("\\", "/"))
     log_s = _escape_yaml_dq(str(log_dir.resolve()).replace("\\", "/"))

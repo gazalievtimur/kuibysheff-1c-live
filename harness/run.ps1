@@ -101,8 +101,16 @@ if ($RequirePlatform) { $pyArgs += "--require-platform" }
 if ($WithSearxng) { $pyArgs += "--with-searxng" }
 
 Write-Host "Using kbshff: $AgentBin"
-python @pyArgs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    python @pyArgs
+    $evalExit = 0
+    if (Test-Path variable:/LASTEXITCODE) { $evalExit = [int]$LASTEXITCODE }
+} finally {
+    $ErrorActionPreference = $prevEap
+}
+if ($evalExit -ne 0) { exit $evalExit }
 
 $latest = Get-ChildItem -LiteralPath (Join-Path $WorkflowDir "runs") -Directory -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
