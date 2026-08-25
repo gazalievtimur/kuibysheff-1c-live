@@ -52,5 +52,5 @@ Product conveyor / VS Code (`1c-dev`) stays in the agent repo; this repo is the 
 
 ## Related
 
-- [kuibysheff-aoc](https://github.com/gybson63/kuibysheff-aoc)
-- [kuibysheff-swebench](https://github.com/gybson63/kuibysheff-swebench)
+- [kuibysheff-aoc](https://github.com/gazalievtimur/kuibysheff-aoc)
+- [kuibysheff-swebench](https://github.com/gazalievtimur/kuibysheff-swebench)
