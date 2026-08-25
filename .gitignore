@@ -6,3 +6,7 @@ harness/runs/
 *.pyc
 .venv/
 venv/
+
+harness/notes/runs/
+live-run.log
+
