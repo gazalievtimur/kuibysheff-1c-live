@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Enum uuid="a1000001-0001-4000-8000-000000000010">
+		<InternalInfo>
+			<xr:GeneratedType name="EnumObject.ВидыНоменклатуры" category="Object">
+				<xr:TypeId>669f4795-4209-5846-924f-5217082611fd</xr:TypeId>
+				<xr:ValueId>fe180f73-aa5a-50c6-bb57-96de7619a4ec</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumRef.ВидыНоменклатуры" category="Ref">
+				<xr:TypeId>ee565f22-5e06-5895-b35f-1663a434c549</xr:TypeId>
+				<xr:ValueId>fe04b9ff-98b3-5930-afe2-3b3ab26f0ca0</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumSelection.ВидыНоменклатуры" category="Selection">
+				<xr:TypeId>399e7895-2c1c-5ad0-a98d-19bf0e41572c</xr:TypeId>
+				<xr:ValueId>b9ac13a1-c8df-55bd-be88-c7ceef867d21</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumList.ВидыНоменклатуры" category="List">
+				<xr:TypeId>d4b93800-8ad5-5168-8f54-55cefe6461a1</xr:TypeId>
+				<xr:ValueId>7a5769c4-cbde-5533-beca-46e0199a2ed3</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumManager.ВидыНоменклатуры" category="Manager">
+				<xr:TypeId>2e127a2d-5f56-5913-a90f-c59fb17581c3</xr:TypeId>
+				<xr:ValueId>30760820-303e-58f6-92c4-dcca6c4eecbb</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>ВидыНоменклатуры</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Виды номенклатуры</v8:content>
+				</v8:item>
+			</Synonym>
+		</Properties>
+		<ChildObjects>
+			<EnumValue uuid="cbd80501-6467-5d6f-a497-e1602e1c9909">
+				<Properties>
+					<Name>Товар</Name>
+					<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Товар</v8:content>
+				</v8:item>
+			</Synonym>
+				</Properties>
+			</EnumValue>
+			<EnumValue uuid="e01aba52-e1f9-53f5-bfa8-6e0497c34ba1">
+				<Properties>
+					<Name>Услуга</Name>
+					<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Услуга</v8:content>
+				</v8:item>
+			</Synonym>
+				</Properties>
+			</EnumValue>
+		</ChildObjects>
+	</Enum>
+</MetaDataObject>

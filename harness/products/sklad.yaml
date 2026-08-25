@@ -1,0 +1,12 @@
+# Product descriptor for the Склад live fixture (1c-live copy-unit).
+# Consumed by eval.py; not part of the agent product tree.
+
+id: sklad
+name: Склад
+cf_dump: ../cf
+yaxunit_cfe: ../cfe/YAxUnit_Tests_Sklad
+compatibility: "8.3.23"
+apply_mode: copy_out
+notes: >
+  Original toy warehouse CF for live CFE evals. Agents must not write into cf/.
+  YAxUnit extension is loaded only when -RequirePlatform is set.
