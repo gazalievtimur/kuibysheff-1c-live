@@ -16,12 +16,20 @@ mcp:
 
   - name: "code-index"
     command: "REQUIRED_BSL_INDEXER"
-    args: ["serve", "--path", "../../../src/cf"]
+    args: ["serve", "--path", "cf=../../../src/cf"]
     timeout_ms: 60000
 
+  - name: "bsl-language-server"
+    command: "node"
+    args: ["REQUIRED_BSL_LS_MCP"]
+    env:
+      BSL_LS_JAR: "REQUIRED_BSL_LS_JAR"
+      JAVA_HOME: "REQUIRED_JAVA_HOME"
+    timeout_ms: 180000
+
 limits:
-  max_iterations: 80
-  max_tokens: 500000
+  max_iterations: 100
+  max_tokens: 800000
   max_duration_sec: 2400
 
 logging:

@@ -16,7 +16,7 @@ Turn an approved CFE plan into **YAxUnit tests that currently fail** on the base
 - Read `in/docs/` (public YAxUnit snapshot) **before** writing tests
 - Read `in/expect.json`: `yaxunit.procedure` and `test_contains` are **mandatory exact BSL names**
 - Read `in/prd.md`, `in/tasks.md`, `in/cfe-scope.md`, `in/architecture.md`, `in/task_brief.md`
-- Research CF via code-index / sntx_sem / local_tools
+- Research CF via code-index / sntx_sem / local_tools (`code-index` needs `"repo":"cf"`; `sntx_sem` required before platform BSL in tests)
 - SearXNG only as supplement to `in/docs/`, only public YAxUnit URLs, cite them
 - Write tests under `out/` only
 
@@ -45,11 +45,12 @@ Schema:
 4. Read `in/expect.json` and `in/task_brief.md`. Gate procedure = `Процедура <exact>()` with the name from `expect.yaxunit.procedure` / `agreements.md`. Extra tests are allowed; **do not rename the gate**.
 5. If brief, expect, and `agreements.md` disagree on an identifier → `blocked`.
 6. Read the approved plan. Map acceptance criteria to tests; keep literals.
-7. Research CF objects named in the plan (do not patch them).
+7. Research CF objects named in the plan (code-index `repo=cf`) and call `sntx_sem.search_bsl_syntax` or `search_help` before writing platform BSL in tests (do not patch CF).
 8. Write common-module BSL under `out/tests/` using `ИсполняемыеСценарии`, `ЮТТесты.ДобавитьТест` / `ДобавитьСерверныйТест`, `ЮТест.ОжидаетЧто`. Prefer `.ВТранзакции()`. Assert the effect of `Записать` (refusal/exception/not saved), not a dummy local `Отказ`.
 9. Mirror modules into `out/cfe-tests/` (Configuration.xml + CommonModules/.../Ext/Module.bsl).
-10. Write `test-report.md`: docs/URLs, procedure names, expected fail-on-baseline, **verification table**.
-11. Write `manifest.json` with `apply_mode: "none"`.
-12. `done=true`.
+10. Lint with `bsl-language-server.analyze` using absolute paths from `in/bsl-lint.json`; fix errors before finishing.
+11. Write `test-report.md`: docs/URLs, procedure names, expected fail-on-baseline, **verification table**. Note sntx_sem and bsl-ls usage.
+12. Write `manifest.json` with `apply_mode: "none"`.
+13. `done=true`.
 
 Unknown API → open `in/docs/` or SearXNG; otherwise `blocked`.

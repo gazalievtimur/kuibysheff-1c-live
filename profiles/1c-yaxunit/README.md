@@ -9,5 +9,6 @@ Public docs snapshot is supplied by the 1c-live harness as `in/docs/`
 
 - `1c-sntx-sem` MCP
 - code-index against product CF
+- `bsl-language-server` MCP (`analyze` on written test BSL)
 - `in/docs/` pack (required at eval time)
 - Optional SearXNG

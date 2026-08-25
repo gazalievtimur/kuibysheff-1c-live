@@ -9,7 +9,7 @@ skill "yaxunit_docs" {
 }
 
 skill "platform_help" {
-  policy: "Platform help for BSL used inside tests (documents, queries). Read-only."
+  policy: "REQUIRED before writing BSL assertions that touch platform APIs (documents, write, refuse): call sntx_sem.search_bsl_syntax or sntx_sem.search_help at least once. Prefer get_topic on the best hit. Do not invent BSL."
   allowed_tools: [
     "sntx_sem.search_help",
     "sntx_sem.search_bsl_syntax",
@@ -19,7 +19,7 @@ skill "platform_help" {
 }
 
 skill "code_index" {
-  policy: "Read/search CF dump to know objects under test. Do not invent symbols."
+  policy: "Read/search CF dump to know objects under test. Every call must pass repo=cf. Do not invent symbols."
   allowed_tools: [
     "code-index.search",
     "code-index.find_symbol",
@@ -29,6 +29,16 @@ skill "code_index" {
     "code_index.find_symbol",
     "code_index.get_file",
     "code_index.list_files"
+  ]
+}
+
+skill "bsl_lint" {
+  policy: "REQUIRED after writing YAxUnit BSL: call bsl-language-server.analyze with absolute srcDir from in/bsl-lint.json. Fix errors before done=true. Tests are BSL too."
+  allowed_tools: [
+    "bsl-language-server.analyze",
+    "bsl-language-server.version",
+    "bsl_language_server.analyze",
+    "bsl_language_server.version"
   ]
 }
 

@@ -1,10 +1,10 @@
 skill "workspace" {
-  policy: "Read in/ and write plan artifacts under out/ only. Optional home.run for read-only git/rg when configured."
+  policy: "Read in/ and write plan artifacts under out/ only. One home.write per turn (one file per iteration). Optional home.run for read-only git/rg when configured."
   allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
 }
 
 skill "platform_help" {
-  policy: "Use 1C platform help MCP for BSL syntax, query language, and topics. Read-only."
+  policy: "REQUIRED before claiming BSL or extension-directive facts: call sntx_sem.search_bsl_syntax or sntx_sem.search_help at least once, then get_topic for the best hit. Do not invent platform syntax. Workflow search then get_topic then optional find_examples."
   allowed_tools: [
     "sntx_sem.search_help",
     "sntx_sem.search_bsl_syntax",
@@ -26,7 +26,7 @@ skill "conf_docs" {
 }
 
 skill "code_index" {
-  policy: "Search and navigate CF dump via code-index MCP. Read-only."
+  policy: "Search CF dump via code-index. Every call must pass repo=cf. Use find_symbol with name= and list_files with path_prefix or pattern. Read-only."
   allowed_tools: [
     "code-index.search",
     "code-index.find_symbol",
