@@ -459,7 +459,9 @@ def _write_stage_config(
     log_s = _escape_yaml_dq(str(log_dir.resolve()).replace("\\", "/"))
     sntx_s = _escape_yaml_dq(sntx_config.replace("\\", "/"))
     idx_s = _escape_yaml_dq(indexer.replace("\\", "/"))
-    py_s = _escape_yaml_dq(str(Path(sntx_python).resolve()).replace("\\", "/"))
+    # Do not Path.resolve() the interpreter: on Linux a venv `bin/python` symlink
+    # would collapse to system python and lose site-packages.
+    py_s = _escape_yaml_dq(str(Path(sntx_python).expanduser().absolute()).replace("\\", "/"))
     sntx_src = _escape_yaml_dq(
         str((Path(sntx_config).resolve().parent / "src").as_posix())
     )
