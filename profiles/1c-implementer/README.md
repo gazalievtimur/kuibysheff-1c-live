@@ -1,8 +1,8 @@
 # 1c-implementer
 
-1c-live stage 4: coder sources → apply-ready `out/cfe/` using agreements identifiers; copy `in/cfe-tests/` → `out/cfe-tests/` without rewriting tests. Orchestrator copies via `adapters/default/apply-out.ps1` (or `adapters/<product>/`) and optionally runs BuildCfe.
+Стадия 4 конвейера 1c-live: исходники coder → готовое к применению `out/cfe/` с идентификаторами из договорённостей; копия `in/cfe-tests/` → `out/cfe-tests/` без переписывания тестов. Оркестратор копирует через `adapters/default/apply-out.ps1` (или `adapters/<product>/`) и при необходимости запускает BuildCfe.
 
-## Dependencies
+## Зависимости
 
-- [`code-index`](https://github.com/Regsorm/code-index-mcp) / [`sntx_sem`](https://github.com/gybson63/1c-sntx-sem) as needed
-- [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) MCP (`analyze` on packed `out/cfe`)
+- [`code-index`](https://github.com/Regsorm/code-index-mcp) / [`sntx_sem`](https://github.com/gybson63/1c-sntx-sem) по необходимости
+- MCP [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) (`analyze` по упакованному `out/cfe`)

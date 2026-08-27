@@ -1,113 +1,107 @@
-# 1c-live — Склад (outside the agent product)
+# 1c-live — Склад
 
-Live eval copy-unit for honing `kbshff` + `test-agents/1c-*` on a **toy warehouse CF**.
-This directory is gitignored with the rest of `/workflows/` and is intended as a
-future sibling project in the same repository — **not** part of the agent product tree.
+Live-eval для оттачивания `kbshff` + профилей `profiles/1c-*` на **учебной CF склада**.
+Этот каталог — оркестратор standalone-репозитория `kuibysheff-1c-live`, не часть продуктового дерева агента.
 
-Do **not** add `-1c` to the agent `check.ps1` gate. Run this workflow from here.
+Не включайте этот gate в `check.ps1` агента с флагом вроде `-1c`. Запускайте отсюда.
 
-Pipeline: **analyst → yaxunit → coder → implementer**. YAxUnit writes TDD tests
-(fail on baseline CF) from the approved plan plus a public docs snapshot; coder
-implements against those tests; implementer packages the feature CFE and copies
-the generated test CFE.
+Конвейер: **analyst → yaxunit → coder → implementer**. YAxUnit пишет TDD-тесты
+(падают на baseline CF) по утверждённому плану и снимку публичной документации;
+coder реализует против этих тестов; implementer упаковывает feature-CFE и копирует
+сгенерированное тестовое CFE.
 
-## Layout
+## Структура
 
 ```text
-workflows/1c-live/
-  cf/                         Designer dump «Склад» (+ planted defects)
-  cfe/YAxUnit_Tests_Sklad/    Fallback stub tests (if the agent produced none)
-  docs/yaxunit/               Public YAxUnit snapshot (copied to in/docs/)
-  bank/*.json                 Live tasks (default gate: cfe-qty-check-01)
+harness/
+  cf/                         выгрузка «Склад» (+ заложенные дефекты)
+  cfe/YAxUnit_Tests_Sklad/    запасные stub-тесты (если агент ничего не дал)
+  docs/yaxunit/               снимок публичных docs YAxUnit → in/docs/
+  bank/*.json                 live-задачи (gate по умолчанию: cfe-qty-check-01)
   products/sklad.yaml
-  eval.py                     four-stage harness
+  eval.py                     четырёхстадийный harness
   score.py / assert_regression.py
-  run-yaxunit.ps1             Optional ibcmd / platform step
-  run.ps1 / run.sh            Entry points
-  test_smoke_offline.py       Offline dry-run
-  notes/                      Разбор прогонов и описание, как идёт работа
-  runs/                       Per-run homes + report.json + NOTES.md
+  run-yaxunit.ps1             опциональный шаг ibcmd / платформы
+  run.ps1 / run.sh            точки входа
+  test_smoke_offline.py       офлайн dry-run
+  notes/                      разбор прогонов и описание работы
+  runs/                       homes прогонов + report.json + NOTES.md
 ```
 
-## Requirements
+Профили импортируются из `../profiles/1c-*`.
 
-| Need | Notes |
+## Требования
+
+| Нужно | Заметки |
 | --- | --- |
-| Release `kbshff` | `cargo build --release` (done by `run.ps1` unless `-SkipBuild`) |
-| Provider API key | From `agent-config.local.yaml` or `test-agents/1c-analyst/agent-config.example.yaml` |
-| `SNTX_SEM_CONFIG` | Path to [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) `config.yaml` |
-| `SNTX_SEM_PYTHON` | Optional; defaults to `1c-sntx-sem/.venv/.../python` |
-| `BSL_INDEXER` / `CODE_INDEX_BIN` | Path to `bsl-indexer` from [`code-index-mcp`](https://github.com/Regsorm/code-index-mcp) (Releases or `cargo build -p bsl-indexer`) |
-| `CODE_INDEX_HOME` | Optional; defaults to the directory of `bsl-indexer` (holds `daemon.toml`) |
-| `BSL_LS_MCP` / `BSL_LS_SERVER` | Path to `bsl-ls-mcp/server.js` (ЗУП-style Node MCP over the JAR) |
-| `BSL_LS_JAR` | Path to `bsl-language-server-*-exec.jar` from [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) |
-| `JAVA_HOME` | Java 17+ for BSL-LS (optional if `java` is on PATH) |
-| Optional platform | `IBCMD_PATH` or install under `Program Files\1cv8` for `-RequirePlatform` |
+| Release `kbshff` | `cargo build --release` (делает `run.ps1`, если нет `-SkipBuild`) |
+| API-ключ провайдера | Из `agent-config.local.yaml` или `profiles/1c-analyst/agent-config.example.yaml` |
+| `SNTX_SEM_CONFIG` | Путь к `config.yaml` [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) |
+| `SNTX_SEM_PYTHON` | Опционально; по умолчанию `1c-sntx-sem/.venv/.../python` |
+| `BSL_INDEXER` / `CODE_INDEX_BIN` | Путь к `bsl-indexer` из [`code-index-mcp`](https://github.com/Regsorm/code-index-mcp) (Releases или `cargo build -p bsl-indexer`) |
+| `CODE_INDEX_HOME` | Опционально; по умолчанию каталог `bsl-indexer` (там `daemon.toml`) |
+| `BSL_LS_MCP` / `BSL_LS_SERVER` | Путь к `bsl-ls-mcp/server.js` (Node MCP поверх JAR, стиль ЗУП) |
+| `BSL_LS_JAR` | Путь к `bsl-language-server-*-exec.jar` из [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) |
+| `JAVA_HOME` | Java 17+ для BSL-LS (необязательно, если `java` в PATH) |
+| Опционально платформа | `IBCMD_PATH` или установка в `Program Files\1cv8` для `-RequirePlatform` |
 
-`run.ps1` / `run.sh` set `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1` by default so stdio MCP
-(`sntx_sem`, `code-index`, `bsl-language-server`) can start under the worker’s cleared child environment.
+`run.ps1` / `run.sh` по умолчанию ставят `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1`, чтобы stdio MCP
+(`sntx_sem`, `code-index`, `bsl-language-server`) стартовали в очищенном окружении worker'а.
 
-**code-index:** MCP `serve` is a transport over the running `bsl-indexer` daemon
+**code-index:** MCP `serve` — транспорт поверх daemon `bsl-indexer`
 ([Regsorm/code-index-mcp](https://github.com/Regsorm/code-index-mcp)).
-Eval registers `harness/cf` in `daemon.toml` (alias `cf`) and reloads the daemon.
-Every `code-index.*` tool call must pass `"repo":"cf"` (kbshff also auto-fills
-`repo` when the server has a single `--path` alias).
+Eval регистрирует `harness/cf` в `daemon.toml` (alias `cf`) и перезагружает daemon.
+Каждый вызов `code-index.*` должен передавать `"repo":"cf"` (kbshff также подставляет
+`repo`, если у сервера один `--path`-alias).
 
-**bsl-language-server:** Wired on yaxunit / coder / implementer (tests are BSL too).
-After writing sources, agents must call `analyze` with absolute `srcDir` from
-`in/bsl-lint.json` (JAR from [1c-syntax/bsl-language-server](https://github.com/1c-syntax/bsl-language-server); same Node+JAR layout as the ЗУП Cursor MCP).
+**bsl-language-server:** подключён на yaxunit / coder / implementer (тесты тоже BSL).
+После записи исходников агенты должны вызвать `analyze` с абсолютным `srcDir` из
+`in/bsl-lint.json` (JAR из [1c-syntax/bsl-language-server](https://github.com/1c-syntax/bsl-language-server); тот же layout Node+JAR, что в Cursor MCP ЗУП).
 
-Profiles are imported from the sibling agent project:
+## Документация YAxUnit
 
-- `test-agents/1c-analyst`
-- `test-agents/1c-yaxunit`
-- `test-agents/1c-coder`
-- `test-agents/1c-implementer`
+Стадия yaxunit не должна выдумывать API. Eval копирует `docs/yaxunit/` →
+`homes/.../yaxunit/in/docs/` перед `kbshff run`.
 
-## YAxUnit docs
-
-The yaxunit stage must not invent API. Eval copies `docs/yaxunit/` →
-`homes/.../yaxunit/in/docs/` before `kbshff run`.
-
-Canonical public sources (OSS BIA Technologies, not ITS):
+Канонические публичные источники (OSS BIA Technologies, не ИТС):
 
 - https://bia-technologies.github.io/yaxunit/
 - https://github.com/bia-technologies/yaxunit
-- first test: https://bia-technologies.github.io/yaxunit/docs/getting-started/first-test/
+- первый тест: https://bia-technologies.github.io/yaxunit/docs/getting-started/first-test/
 
-Optional `-WithSearxng` on analyst **and** yaxunit: only those public hosts.
-The snapshot is the source of truth; SearXNG is a supplement.
+Опциональный `-WithSearxng` на analyst **и** yaxunit: только эти публичные хосты.
+Снимок — источник истины; SearXNG — дополнение.
 
-## Commands
+## Команды
 
-Offline (no LLM):
+Офлайн (без LLM):
 
 ```powershell
-.\workflows\1c-live\run.ps1 -DryRun
-# or:
-python .\workflows\1c-live\test_smoke_offline.py
+.\harness\run.ps1 -DryRun
+# или:
+python .\harness\test_smoke_offline.py
 ```
 
 ```bash
-./workflows/1c-live/run.sh --dry-run
+./harness/run.sh --dry-run
 ```
 
-Live gate (default task `cfe-qty-check-01`):
+Live gate (задача по умолчанию `cfe-qty-check-01`):
 
 ```powershell
 $env:SNTX_SEM_CONFIG = "C:\Git\1c-sntx-sem\config.yaml"
 $env:BSL_INDEXER = "C:\mcp\code-index\bsl-indexer.exe"
 $env:BSL_LS_MCP = "$env:USERPROFILE\.claude\bsl-ls-mcp\server.js"
 $env:BSL_LS_JAR = "$env:USERPROFILE\.claude\bsl-ls\bsl-language-server.jar"
-# JAVA_HOME already set on this machine for JDK 17+
-$env:OPENAI_API_KEY = "..."   # or provider api_key_env from config
-.\workflows\1c-live\run.ps1
+# JAVA_HOME уже задан на машине для JDK 17+
+$env:OPENAI_API_KEY = "..."   # или api_key_env провайдера из конфига
+.\harness\run.ps1
 ```
 
 ```powershell
-.\workflows\1c-live\run.ps1 -TaskId cfe-negative-stock-01,cfe-http-filter-01
-.\workflows\1c-live\run.ps1 -All
-.\workflows\1c-live\run.ps1 -RequirePlatform
+.\harness\run.ps1 -TaskId cfe-negative-stock-01,cfe-http-filter-01
+.\harness\run.ps1 -All
+.\harness\run.ps1 -RequirePlatform
 ```
 
 ```bash
@@ -116,51 +110,49 @@ export BSL_INDEXER=/path/to/bsl-indexer
 export BSL_LS_MCP=$HOME/.claude/bsl-ls-mcp/server.js
 export BSL_LS_JAR=$HOME/.claude/bsl-ls/bsl-language-server.jar
 export JAVA_HOME=/path/to/jdk-17+
-./workflows/1c-live/run.sh
-./workflows/1c-live/run.sh --all
-./workflows/1c-live/run.sh --require-platform
+./harness/run.sh
+./harness/run.sh --all
+./harness/run.sh --require-platform
 ```
 
-## Scoring
+## Скоринг
 
-Always (no 1C platform):
+Всегда (без платформы 1С):
 
-1. Loop finished (`agent_stop=goal_reached` = model `done=true`; **not** task pass). `error` / `limit_reached` fail the stage as incomplete.
-2. CF dump fingerprint unchanged (ignores `.code-index/` caches written by `bsl-indexer`)
-3. Analyst `out/agreements.md` (literals from expect) + plan files + `plan_contains`
-4. YAxUnit `out/test-report.md` + BSL (`ЮТТесты` / `ЮТест`) + `test_contains` / procedure name + `apply_mode=none`
-5. Coder `out/src` + needles + `code-report.md`
-6. Implementer `out/cfe` + object/needle checks + `apply_mode=copy_out`
+1. Цикл завершён (`agent_stop=goal_reached` = модель `done=true`; **не** «задача сдана»). `error` / `limit_reached` валят стадию как незавершённую.
+2. Fingerprint выгрузки CF не изменился (игнор кэшей `.code-index/` от `bsl-indexer`)
+3. Analyst: `out/agreements.md` (литералы из expect) + файлы плана + `plan_contains`
+4. YAxUnit: `out/test-report.md` + BSL (`ЮТТесты` / `ЮТест`) + `test_contains` / имя процедуры + `apply_mode=none`
+5. Coder: `out/src` + needles + `code-report.md`
+6. Implementer: `out/cfe` + проверки объектов/needles + `apply_mode=copy_out`
 
-Optional (`-RequirePlatform`): discover `ibcmd`, stage CF + **generated** test CFE
-(`implementer/out/cfe-tests`, else `yaxunit/out/cfe-tests`, else fixture
-`cfe/YAxUnit_Tests_Sklad`) + agent feature CFE under `runs/.../yaxunit/`.
-Missing platform fails only when the flag is set.
+Опционально (`-RequirePlatform`): найти `ibcmd`, поднять CF + **сгенерированное** тестовое CFE
+(`implementer/out/cfe-tests`, иначе `yaxunit/out/cfe-tests`, иначе фикстура
+`cfe/YAxUnit_Tests_Sklad`) + feature-CFE агента под `runs/.../yaxunit/`.
+Отсутствие платформы валит прогон только при установленном флаге.
 
 ## Notes (разбор работы)
 
-После live-прогона смотреть `notes/` — карта конвейера и разборы run'ов.
+После live-прогона смотрите `notes/` — карта конвейера и разборы run'ов.
 Протокол договорённостей: `notes/agreements.md` и
-`test-agents/1c-shared/agreements-protocol.md`.
+`profiles/1c-shared/agreements-protocol.md`.
 Смысл `goal_reached`: `notes/goal_reached.md`.
 `eval.py` пишет `runs/<id>/NOTES.md` и копию в `notes/runs/<id>/`.
-Человеческий разбор первого четырёхстадийного прогона:
-`notes/runs/20260817-183746/analysis.md`.
 
-## Fixture domain
+## Предметная область фикстуры
 
-Original **Склад** config (not Union K7): catalogs, documents `ПриходТовара` / `РасходТовара`, register `ОстаткиТоваров`, HTTP `ОбменСкладом`, planted defects for the three bank tasks.
+Оригинальная конфигурация **Склад** (не Union K7): справочники, документы `ПриходТовара` / `РасходТовара`, регистр `ОстаткиТоваров`, HTTP `ОбменСкладом`, заложенные дефекты под три задачи банка.
 
-Regenerate metadata XML (keeps BSL modules):
+Перегенерация metadata XML (BSL-модули сохраняются):
 
 ```powershell
-python .\workflows\1c-live\_gen_fixture.py
+python .\harness\_gen_fixture.py
 ```
 
-## Bank tasks
+## Задачи банка
 
-| id | Focus |
+| id | Фокус |
 | --- | --- |
-| `cfe-qty-check-01` | `ПередЗаписью` qty check on `РасходТовара` (**gate**); procedure `Тест_КоличествоНоль_НеЗаписывается` |
-| `cfe-negative-stock-01` | Block posting below zero on `ОстаткиТоваров` |
-| `cfe-http-filter-01` | Warehouse filter on `ОбменСкладом` GET `/остатки` |
+| `cfe-qty-check-01` | проверка количества в `ПередЗаписью` у `РасходТовара` (**gate**); процедура `Тест_КоличествоНоль_НеЗаписывается` |
+| `cfe-negative-stock-01` | запрет проведения ниже нуля по `ОстаткиТоваров` |
+| `cfe-http-filter-01` | фильтр склада на `ОбменСкладом` GET `/остатки` |
