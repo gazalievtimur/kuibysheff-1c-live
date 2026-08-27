@@ -35,26 +35,27 @@ workflows/1c-live/
 | --- | --- |
 | Release `kbshff` | `cargo build --release` (done by `run.ps1` unless `-SkipBuild`) |
 | Provider API key | From `agent-config.local.yaml` or `test-agents/1c-analyst/agent-config.example.yaml` |
-| `SNTX_SEM_CONFIG` | Path to `1c-sntx-sem` `config.yaml` |
+| `SNTX_SEM_CONFIG` | Path to [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) `config.yaml` |
 | `SNTX_SEM_PYTHON` | Optional; defaults to `1c-sntx-sem/.venv/.../python` |
-| `BSL_INDEXER` / `CODE_INDEX_BIN` | Path to `bsl-indexer` |
+| `BSL_INDEXER` / `CODE_INDEX_BIN` | Path to `bsl-indexer` from [`code-index-mcp`](https://github.com/Regsorm/code-index-mcp) (Releases or `cargo build -p bsl-indexer`) |
 | `CODE_INDEX_HOME` | Optional; defaults to the directory of `bsl-indexer` (holds `daemon.toml`) |
-| `BSL_LS_MCP` / `BSL_LS_SERVER` | Path to `bsl-ls-mcp/server.js` (ЗУП-style Node MCP) |
-| `BSL_LS_JAR` | Path to `bsl-language-server-*-exec.jar` |
+| `BSL_LS_MCP` / `BSL_LS_SERVER` | Path to `bsl-ls-mcp/server.js` (ЗУП-style Node MCP over the JAR) |
+| `BSL_LS_JAR` | Path to `bsl-language-server-*-exec.jar` from [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) |
 | `JAVA_HOME` | Java 17+ for BSL-LS (optional if `java` is on PATH) |
 | Optional platform | `IBCMD_PATH` or install under `Program Files\1cv8` for `-RequirePlatform` |
 
 `run.ps1` / `run.sh` set `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1` by default so stdio MCP
 (`sntx_sem`, `code-index`, `bsl-language-server`) can start under the worker’s cleared child environment.
 
-**code-index:** MCP `serve` is a transport over the running `bsl-indexer` daemon.
+**code-index:** MCP `serve` is a transport over the running `bsl-indexer` daemon
+([Regsorm/code-index-mcp](https://github.com/Regsorm/code-index-mcp)).
 Eval registers `harness/cf` in `daemon.toml` (alias `cf`) and reloads the daemon.
 Every `code-index.*` tool call must pass `"repo":"cf"` (kbshff also auto-fills
 `repo` when the server has a single `--path` alias).
 
 **bsl-language-server:** Wired on yaxunit / coder / implementer (tests are BSL too).
 After writing sources, agents must call `analyze` with absolute `srcDir` from
-`in/bsl-lint.json` (same Node+JAR layout as the ЗУП Cursor MCP).
+`in/bsl-lint.json` (JAR from [1c-syntax/bsl-language-server](https://github.com/1c-syntax/bsl-language-server); same Node+JAR layout as the ЗУП Cursor MCP).
 
 Profiles are imported from the sibling agent project:
 

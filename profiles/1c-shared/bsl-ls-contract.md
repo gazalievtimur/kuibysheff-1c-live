@@ -1,5 +1,6 @@
 # bsl-language-server call contract (1c-live)
 
+Upstream: [`1c-syntax/bsl-language-server`](https://github.com/1c-syntax/bsl-language-server).
 Same MCP as in the ЗУП Cursor project: Node bridge → `bsl-language-server.jar` → `analyze`.
 
 Server name: **`bsl-language-server`**. Tool: **`analyze`**.
