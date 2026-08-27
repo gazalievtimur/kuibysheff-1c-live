@@ -8,13 +8,15 @@
 
 ## Требования
 
+- [OneScript](https://oscript.io/) 2.0 (`oscript` в `PATH`). Канон оркестратора: `oscript -encoding=utf-8 harness/run.os`. OPM-пакеты не нужны.
 - `kbshff` в `PATH`, либо `KBSHFF_BIN`, либо `KUIBYSHEFF_SRC` / соседний checkout
-- Python 3
 - API-ключ провайдера (по умолчанию `OPENAI_API_KEY`)
 - `SNTX_SEM_CONFIG` — путь к `config.yaml` из [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem)
 - `BSL_INDEXER` или `CODE_INDEX_BIN` — путь к `bsl-indexer` из [`code-index-mcp`](https://github.com/Regsorm/code-index-mcp)
 - `BSL_LS_MCP` + `BSL_LS_JAR` (+ `JAVA_HOME`) — MCP [BSL Language Server](https://github.com/1c-syntax/bsl-language-server) в стиле ЗУП (нужно для yaxunit/coder/implementer)
-- Опционально: `SNTX_SEM_PYTHON`, платформа 1С / `ibcmd` (`-RequirePlatform`)
+- Node + Java — runtime MCP `bsl-language-server` (не harness)
+- Python — **только** runtime MCP `sntx_sem`: явный `SNTX_SEM_PYTHON`, либо `1c-sntx-sem/.venv/.../python`, либо бинарь `sntx-sem` в `PATH`. Интерпретатор harness сюда не подставляется.
+- Опционально: платформа 1С / `ibcmd` (`--require-platform`)
 
 Лаунчер выставляет `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1` (stdio MCP + venv).
 
@@ -24,12 +26,16 @@
 Copy-Item .\.env.example .\.env
 # задайте OPENAI_API_KEY, SNTX_SEM_CONFIG, BSL_INDEXER, BSL_LS_MCP, BSL_LS_JAR
 
+oscript -encoding=utf-8 .\harness\run.os --dry-run
+# или обёртка:
 .\harness\run.ps1 -DryRun
 .\scripts\1c-live-regression.ps1
 ```
 
 ```bash
 cp .env.example .env
+oscript -encoding=utf-8 harness/run.os --dry-run
+# или обёртка:
 ./harness/run.sh --dry-run
 ./scripts/1c-live-regression.sh
 ```
@@ -38,7 +44,7 @@ cp .env.example .env
 
 ```text
 profiles/1c-analyst|yaxunit|coder|implementer|1c-shared
-harness/          eval, bank, CF-фикстура, docs YAxUnit
+harness/          OneScript eval, bank, CF-фикстура, docs YAxUnit
 scripts/          resolve-kbshff + тонкая обёртка регрессии
 docs/searxng/     опциональные заметки по SearXNG
 ```

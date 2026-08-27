@@ -56,4 +56,4 @@ Brief хоронил литерал среди ожидаемых артефак
 1. `homes/…/analyst/out/agreements.md` — заморозка
 2. `homes/…/<stage>/in/agreements.json` — банк
 3. Отчёт стадии: таблица сверки
-4. `score.py` needles vs BSL
+4. scoring needles vs BSL
