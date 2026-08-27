@@ -1,20 +1,20 @@
-# sntx_sem call contract (1c-live)
+# Контракт вызовов sntx_sem (1c-live)
 
-Source: [`gybson63/1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem).
+Источник: [`gybson63/1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem).
 
-Use MCP server name **`sntx_sem`** (not `1c-syntax-sem`). Tools are listed in each profile `skills.dsl` under `platform_help`.
+Имя MCP-сервера: **`sntx_sem`** (не `1c-syntax-sem`). Инструменты перечислены в `skills.dsl` каждого профиля в блоке `platform_help`.
 
-## When (required)
+## Когда (обязательно)
 
-Before writing BSL, extension directives (`&Вместо`, `&ИзменениеИКонтроль`), or platform API claims in plan/code:
+Перед написанием BSL, директив расширения (`&Вместо`, `&ИзменениеИКонтроль`) или утверждений про API платформы в плане/коде:
 
-1. Call **at least one** of `search_bsl_syntax` or `search_help`.
-2. Open the best hit with `get_topic` when the snippet is not enough.
-3. Optionally `find_examples` for local-config patterns.
+1. Вызвать **хотя бы один** из `search_bsl_syntax` или `search_help`.
+2. Открыть лучший hit через `get_topic`, если сниппета недостаточно.
+3. По желанию `find_examples` для паттернов из локальных конфигураций.
 
-Do **not** invent platform syntax from memory when these tools are in `Available tools`.
+**Не** выдумывать синтаксис платформы из памяти, пока эти tools есть в `Available tools`.
 
-## Tool shapes
+## Формы вызовов
 
 ```json
 {"server":"sntx_sem","tool":"search_bsl_syntax","arguments":{"query":"ПередЗаписью","limit":5}}
@@ -36,10 +36,10 @@ Do **not** invent platform syntax from memory when these tools are in `Available
 {"server":"sntx_sem","tool":"search_query_language","arguments":{"query":"ВЫБРАТЬ ПЕРВЫЕ","limit":5}}
 ```
 
-Domains for `search_help`: `all`, `bsl`, `query`, `bsp`, `platform_api`, …
+Домены для `search_help`: `all`, `bsl`, `query`, `bsp`, `platform_api`, …
 
 ## Workflow
 
-`search_help` / `search_bsl_syntax` → `get_topic` → (optional) `find_examples`.
+`search_help` / `search_bsl_syntax` → `get_topic` → (опционально) `find_examples`.
 
-Cite what you used briefly in `architecture.md`, `code-report.md`, or `test-report.md` (tool + query).
+Кратко укажите, чем пользовались, в `architecture.md`, `code-report.md` или `test-report.md` (tool + query).

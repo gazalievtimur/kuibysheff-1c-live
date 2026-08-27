@@ -1,14 +1,14 @@
 # 1c-yaxunit
 
-1c-live stage 2: approved plan + frozen agreements → YAxUnit tests (TDD, fail on baseline CF). Gate procedure names are literals from `in/agreements.md`.
+Стадия 2 конвейера 1c-live: утверждённый план + зафиксированные договорённости → тесты YAxUnit (TDD, падают на baseline CF). Имена gate-процедур — литералы из `in/agreements.md`.
 
-Public docs snapshot is supplied by the 1c-live harness as `in/docs/`
-(YAxUnit site + GitHub, BIA Technologies). SearXNG is optional supplement.
+Снимок публичной документации поставляет harness 1c-live как `in/docs/`
+(сайт YAxUnit + GitHub, BIA Technologies). SearXNG — опциональное дополнение.
 
-## Dependencies
+## Зависимости
 
-- [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) MCP
-- [`code-index`](https://github.com/Regsorm/code-index-mcp) against product CF
-- [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) MCP (`analyze` on written test BSL)
-- `in/docs/` pack (required at eval time)
-- Optional SearXNG
+- MCP [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem)
+- [`code-index`](https://github.com/Regsorm/code-index-mcp) по продуктовой CF
+- MCP [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) (`analyze` по написанному тестовому BSL)
+- пакет `in/docs/` (обязателен на eval)
+- Опционально SearXNG
