@@ -19,11 +19,13 @@ harness/
   docs/yaxunit/               снимок публичных docs YAxUnit → in/docs/
   bank/*.json                 live-задачи (gate по умолчанию: cfe-qty-check-01)
   products/sklad.yaml
-  eval.py                     четырёхстадийный harness
-  score.py / assert_regression.py
-  run-yaxunit.ps1             опциональный шаг ibcmd / платформы
-  run.ps1 / run.sh            точки входа
-  test_smoke_offline.py       офлайн dry-run
+  oscript/Модули/             eval, score, fixture, platform (OneScript)
+  run.os / eval.os            четырёхстадийный harness
+  assert-regression.os        проверка report.json
+  run-yaxunit.os              опциональный шаг ibcmd / платформы
+  gen-fixture.os              XML фикстуры (BSL не перезаписывается)
+  test-smoke-offline.os       офлайн dry-run
+  run.ps1 / run.sh            тонкие обёртки oscript
   notes/                      разбор прогонов и описание работы
   runs/                       homes прогонов + report.json + NOTES.md
 ```
@@ -34,16 +36,17 @@ harness/
 
 | Нужно | Заметки |
 | --- | --- |
-| Release `kbshff` | `cargo build --release` (делает `run.ps1`, если нет `-SkipBuild`) |
+| OneScript 2.0 | `oscript` в PATH; канон: `oscript -encoding=utf-8 harness/run.os` |
+| Release `kbshff` | `cargo build --release` (делает `run.os` / `run.ps1`, если нет `--skip-build`) |
 | API-ключ провайдера | Из `agent-config.local.yaml` или `profiles/1c-analyst/agent-config.example.yaml` |
 | `SNTX_SEM_CONFIG` | Путь к `config.yaml` [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) |
-| `SNTX_SEM_PYTHON` | Опционально; по умолчанию `1c-sntx-sem/.venv/.../python` |
+| `SNTX_SEM_PYTHON` / `sntx-sem` | Runtime **MCP** `sntx_sem` (не harness). Либо явный интерпретатор, либо `1c-sntx-sem/.venv/.../python`, либо `sntx-sem` в PATH |
 | `BSL_INDEXER` / `CODE_INDEX_BIN` | Путь к `bsl-indexer` из [`code-index-mcp`](https://github.com/Regsorm/code-index-mcp) (Releases или `cargo build -p bsl-indexer`) |
 | `CODE_INDEX_HOME` | Опционально; по умолчанию каталог `bsl-indexer` (там `daemon.toml`) |
 | `BSL_LS_MCP` / `BSL_LS_SERVER` | Путь к `bsl-ls-mcp/server.js` (Node MCP поверх JAR, стиль ЗУП) |
 | `BSL_LS_JAR` | Путь к `bsl-language-server-*-exec.jar` из [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) |
 | `JAVA_HOME` | Java 17+ для BSL-LS (необязательно, если `java` в PATH) |
-| Опционально платформа | `IBCMD_PATH` или установка в `Program Files\1cv8` для `-RequirePlatform` |
+| Опционально платформа | `IBCMD_PATH` или установка в `Program Files\1cv8` для `--require-platform` |
 
 `run.ps1` / `run.sh` по умолчанию ставят `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1`, чтобы stdio MCP
 (`sntx_sem`, `code-index`, `bsl-language-server`) стартовали в очищенном окружении worker'а.
@@ -77,12 +80,14 @@ Eval регистрирует `harness/cf` в `daemon.toml` (alias `cf`) и пе
 Офлайн (без LLM):
 
 ```powershell
-.\harness\run.ps1 -DryRun
+oscript -encoding=utf-8 .\harness\run.os --dry-run
 # или:
-python .\harness\test_smoke_offline.py
+.\harness\run.ps1 -DryRun
+oscript -encoding=utf-8 .\harness\test-smoke-offline.os
 ```
 
 ```bash
+oscript -encoding=utf-8 harness/run.os --dry-run
 ./harness/run.sh --dry-run
 ```
 
@@ -137,7 +142,7 @@ export JAVA_HOME=/path/to/jdk-17+
 Протокол договорённостей: `notes/agreements.md` и
 `profiles/1c-shared/agreements-protocol.md`.
 Смысл `goal_reached`: `notes/goal_reached.md`.
-`eval.py` пишет `runs/<id>/NOTES.md` и копию в `notes/runs/<id>/`.
+`eval.os` пишет `runs/<id>/NOTES.md` и копию в `notes/runs/<id>/`.
 
 ## Предметная область фикстуры
 
@@ -146,7 +151,7 @@ export JAVA_HOME=/path/to/jdk-17+
 Перегенерация metadata XML (BSL-модули сохраняются):
 
 ```powershell
-python .\harness\_gen_fixture.py
+oscript -encoding=utf-8 .\harness\gen-fixture.os
 ```
 
 ## Задачи банка

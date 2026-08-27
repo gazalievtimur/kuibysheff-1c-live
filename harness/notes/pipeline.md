@@ -2,7 +2,7 @@
 
 Конвейер живого eval — не оркестратор продукта. `kbshff` на каждой стадии
 один раз: `run --agent <id> --home homes/<task>/<stage> --prompt …`.
-Склейку артефактов делает `eval.py`.
+Склейку артефактов делает `eval.os`.
 
 ```text
 task_brief  →  1c-analyst   →  out/{prd,tasks,cfe-scope,architecture,…}

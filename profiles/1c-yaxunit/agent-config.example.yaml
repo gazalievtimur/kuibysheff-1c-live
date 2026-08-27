@@ -11,6 +11,7 @@ provider:
 
 mcp:
   - name: "sntx_sem"
+    # Live eval перезаписывает command/args: SNTX_SEM_PYTHON или бинарь sntx-sem.
     command: "python"
     args: ["-m", "sntx_sem.mcp_server"]
     env:

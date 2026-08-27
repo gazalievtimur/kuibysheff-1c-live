@@ -6,6 +6,9 @@ harness/runs/
 *.pyc
 .venv/
 venv/
+oscript_modules/
+**/.code-index/
+**/.code-index/
 
 harness/notes/runs/
 live-run.log

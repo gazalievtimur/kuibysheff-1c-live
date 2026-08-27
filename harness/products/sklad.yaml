@@ -1,5 +1,5 @@
 # Product descriptor for the Склад live fixture (1c-live copy-unit).
-# Consumed by eval.py; not part of the agent product tree.
+# Consumed by eval.os; not part of the agent product tree.
 
 id: sklad
 name: Склад
