@@ -11,9 +11,9 @@ Independent example repo — use it to learn CLI orchestration with 1C MCP tooli
 - `kbshff` on `PATH`, or `KBSHFF_BIN`, or `KUIBYSHEFF_SRC` / sibling checkout
 - Python 3
 - Provider API key (`OPENAI_API_KEY` by default)
-- `SNTX_SEM_CONFIG` — path to `1c-sntx-sem` `config.yaml`
-- `BSL_INDEXER` or `CODE_INDEX_BIN` — path to `bsl-indexer`
-- `BSL_LS_MCP` + `BSL_LS_JAR` (+ `JAVA_HOME`) — BSL Language Server MCP as in ЗУП (required for yaxunit/coder/implementer)
+- `SNTX_SEM_CONFIG` — path to [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) `config.yaml`
+- `BSL_INDEXER` or `CODE_INDEX_BIN` — path to `bsl-indexer` from [`code-index-mcp`](https://github.com/Regsorm/code-index-mcp)
+- `BSL_LS_MCP` + `BSL_LS_JAR` (+ `JAVA_HOME`) — [BSL Language Server](https://github.com/1c-syntax/bsl-language-server) MCP as in ЗУП (required for yaxunit/coder/implementer)
 - Optional: `SNTX_SEM_PYTHON`, 1C platform/`ibcmd` (`-RequirePlatform`)
 
 `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1` is set by the launcher (stdio MCP + venv).
@@ -53,5 +53,14 @@ Product conveyor / VS Code (`1c-dev`) stays in the agent repo; this repo is the 
 
 ## Related
 
+Example orchestrators:
+
 - [kuibysheff-aoc](https://github.com/gazalievtimur/kuibysheff-aoc)
 - [kuibysheff-swebench](https://github.com/gazalievtimur/kuibysheff-swebench)
+
+MCP tooling used by this gate:
+
+- [1c-sntx-sem](https://github.com/gybson63/1c-sntx-sem) — platform help (`sntx_sem`)
+- [code-index-mcp](https://github.com/Regsorm/code-index-mcp) — `bsl-indexer` / `code-index` over CF
+- [bsl-language-server](https://github.com/1c-syntax/bsl-language-server) — BSL `analyze` (JAR; ЗУП-style Node bridge)
+- [1c-conf-doc](https://github.com/gybson63/1c-conf-doc) — optional configuration-doc MCP

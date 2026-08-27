@@ -6,9 +6,9 @@ Identifiers from `in/agreements.json` are literals (see [`../1c-shared/agreement
 
 ## Dependencies
 
-- `1c-sntx-sem` MCP (`python -m sntx_sem.mcp_server`)
-- `code-index` / `bsl-indexer` pointed at product CF
+- [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) MCP (`python -m sntx_sem.mcp_server`)
+- [`code-index`](https://github.com/Regsorm/code-index-mcp) / `bsl-indexer` pointed at product CF
 - SearXNG MCP at `mcp.searxngUrl` (default `http://127.0.0.1:3000/mcp`)
-- Optional: conf-doc MCP
+- Optional: [`1c-conf-doc`](https://github.com/gybson63/1c-conf-doc) MCP
 
 Orchestrator warns and continues if SearXNG is down unless `-RequireSearx`.

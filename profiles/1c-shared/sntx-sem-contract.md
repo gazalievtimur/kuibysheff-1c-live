@@ -1,5 +1,7 @@
 # sntx_sem call contract (1c-live)
 
+Source: [`gybson63/1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem).
+
 Use MCP server name **`sntx_sem`** (not `1c-syntax-sem`). Tools are listed in each profile `skills.dsl` under `platform_help`.
 
 ## When (required)

@@ -4,6 +4,6 @@
 
 ## Dependencies
 
-- Platform help MCP (`sntx_sem`)
-- code-index against product CF
-- `bsl-language-server` MCP (`analyze` on `out/src`)
+- Platform help MCP ([`sntx_sem`](https://github.com/gybson63/1c-sntx-sem))
+- [`code-index`](https://github.com/Regsorm/code-index-mcp) against product CF
+- [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) MCP (`analyze` on `out/src`)

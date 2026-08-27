@@ -4,5 +4,5 @@
 
 ## Dependencies
 
-- code-index / sntx_sem as needed
-- `bsl-language-server` MCP (`analyze` on packed `out/cfe`)
+- [`code-index`](https://github.com/Regsorm/code-index-mcp) / [`sntx_sem`](https://github.com/gybson63/1c-sntx-sem) as needed
+- [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) MCP (`analyze` on packed `out/cfe`)

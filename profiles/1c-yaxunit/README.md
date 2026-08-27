@@ -7,8 +7,8 @@ Public docs snapshot is supplied by the 1c-live harness as `in/docs/`
 
 ## Dependencies
 
-- `1c-sntx-sem` MCP
-- code-index against product CF
-- `bsl-language-server` MCP (`analyze` on written test BSL)
+- [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) MCP
+- [`code-index`](https://github.com/Regsorm/code-index-mcp) against product CF
+- [`bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) MCP (`analyze` on written test BSL)
 - `in/docs/` pack (required at eval time)
 - Optional SearXNG
