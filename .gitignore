@@ -8,8 +8,15 @@ harness/runs/
 venv/
 oscript_modules/
 **/.code-index/
-**/.code-index/
 
 harness/notes/runs/
 live-run.log
 
+# Bootstrap artifacts from scripts/install.ps1 / install.sh
+tools/bsl-indexer.exe
+tools/bsl-indexer
+tools/code-index/
+tools/bsl-ls/
+tools/1c-sntx-sem/
+tools/.kbshff-install/
+tools/bsl-ls-mcp/node_modules/

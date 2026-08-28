@@ -1,11 +1,36 @@
 // Запись agent-config.yaml стадии (MCP + limits + access).
+// Провайдер: KBSHFF_PROVIDER_* из .env, иначе YAML-шаблон. После записи
+// оркестратор вызывает kbshff config provider set (CLI — канон).
+
+Функция Провайдер(БазовыйТекст) Экспорт
+	Результат = Новый Структура;
+	BaseUrl = Окружение.ПеременнаяСреды("KBSHFF_PROVIDER_BASE_URL");
+	Если Не ЗначениеЗаполнено(BaseUrl) Тогда
+		BaseUrl = YamlУтилиты.Скаляр(БазовыйТекст, "base_url", "https://api.openai.com/v1");
+	КонецЕсли;
+	Модель = Окружение.ПеременнаяСреды("KBSHFF_PROVIDER_MODEL");
+	Если Не ЗначениеЗаполнено(Модель) Тогда
+		Модель = YamlУтилиты.Скаляр(БазовыйТекст, "model", "gpt-4o");
+	КонецЕсли;
+	ApiKeyEnv = Окружение.ПеременнаяСреды("KBSHFF_PROVIDER_API_KEY_ENV");
+	Если Не ЗначениеЗаполнено(ApiKeyEnv) Тогда
+		ApiKeyEnv = YamlУтилиты.Скаляр(БазовыйТекст, "api_key_env", "OPENAI_API_KEY");
+	КонецЕсли;
+	TimeoutMs = YamlУтилиты.Скаляр(БазовыйТекст, "timeout_ms", "180000");
+	Результат.Вставить("BaseUrl", BaseUrl);
+	Результат.Вставить("Модель", Модель);
+	Результат.Вставить("ApiKeyEnv", ApiKeyEnv);
+	Результат.Вставить("TimeoutMs", TimeoutMs);
+	Возврат Результат;
+КонецФункции
 
 Процедура Записать(Путь, БазовыйТекст, КаталогЛогов, CfRoot, CfIndexRoot, SntxConfig, Indexer, SntxCommand, SntxArgs, IncludeSearxng, BslLs, ИмяСтадии) Экспорт
 	ПС = Символы.ПС;
-	BaseUrl = YamlУтилиты.Скаляр(БазовыйТекст, "base_url", "https://api.openai.com/v1");
-	Модель = YamlУтилиты.Скаляр(БазовыйТекст, "model", "gpt-4o");
-	ApiKeyEnv = YamlУтилиты.Скаляр(БазовыйТекст, "api_key_env", "OPENAI_API_KEY");
-	TimeoutMs = YamlУтилиты.Скаляр(БазовыйТекст, "timeout_ms", "180000");
+	Пров = Провайдер(БазовыйТекст);
+	BaseUrl = Пров.BaseUrl;
+	Модель = Пров.Модель;
+	ApiKeyEnv = Пров.ApiKeyEnv;
+	TimeoutMs = Пров.TimeoutMs;
 	MaxIter = YamlУтилиты.Скаляр(БазовыйТекст, "max_iterations", "80");
 	MaxTokens = YamlУтилиты.Скаляр(БазовыйТекст, "max_tokens", "800000");
 	MaxDur = YamlУтилиты.Скаляр(БазовыйТекст, "max_duration_sec", "2400");
