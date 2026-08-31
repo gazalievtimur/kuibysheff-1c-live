@@ -12,6 +12,9 @@ oscript_modules/
 harness/notes/runs/
 live-run.log
 
+# Local kbshff protected store after scripts/install (skills + provider)
+.kuibysheff/
+
 # Bootstrap artifacts from scripts/install.ps1 / install.sh
 tools/bsl-indexer.exe
 tools/bsl-indexer

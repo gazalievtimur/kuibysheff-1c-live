@@ -456,8 +456,17 @@ function Resolve-JavaHome([hashtable]$EnvMap) {
     return ""
 }
 
-function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$AgentId, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
-    Write-Step "kbshff CLI: init / import / provider set / check ($AgentId)"
+function Get-ConveyorAgents {
+    return @(
+        @{ Id = "1c-analyst"; Skills = @("workspace", "platform_help", "conf_docs", "code_index", "local_research", "web_search") },
+        @{ Id = "1c-yaxunit"; Skills = @("workspace", "yaxunit_docs", "platform_help", "code_index", "bsl_lint", "local_research", "web_search") },
+        @{ Id = "1c-coder"; Skills = @("workspace", "platform_help", "code_index", "bsl_lint", "local_research") },
+        @{ Id = "1c-implementer"; Skills = @("workspace", "platform_help", "code_index", "local_research", "bsl_lint") }
+    )
+}
+
+function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$AgentId, [string[]]$ExpectedSkills, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
+    Write-Step "kbshff CLI: init / import skills / provider set / check ($AgentId)"
     New-Item -ItemType Directory -Force -Path $ProjectRoot | Out-Null
     & $Kbshff init $AgentId --project-root $ProjectRoot --force
     if ($LASTEXITCODE -ne 0) {
@@ -471,9 +480,10 @@ function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$A
     $settings = Join-Path $RepoRoot "profiles\$AgentId"
     foreach ($name in @("master_prompt.md", "skills.dsl", "rules.md")) {
         $src = Join-Path $settings $name
-        if (Test-Path -LiteralPath $src -PathType Leaf) {
-            Copy-Item -LiteralPath $src -Destination (Join-Path $staging $name) -Force
+        if (-not (Test-Path -LiteralPath $src -PathType Leaf)) {
+            throw "missing $src - conveyor profile $AgentId is incomplete"
         }
+        Copy-Item -LiteralPath $src -Destination (Join-Path $staging $name) -Force
     }
     & $Kbshff config --project-root $ProjectRoot --agent $AgentId import --from $staging --force
     if ($LASTEXITCODE -ne 0) {
@@ -483,9 +493,27 @@ function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$A
     if ($LASTEXITCODE -ne 0) {
         throw "kbshff config provider set $AgentId failed"
     }
+    $listed = & $Kbshff config --project-root $ProjectRoot --agent $AgentId --format json skill list
+    if ($LASTEXITCODE -ne 0) {
+        throw "kbshff config skill list $AgentId failed"
+    }
+    $listedText = ($listed | Out-String)
+    foreach ($skill in $ExpectedSkills) {
+        if ($listedText -notmatch [regex]::Escape($skill)) {
+            throw "skill '$skill' missing after import of $AgentId. skill list: $listedText"
+        }
+    }
+    Write-Host "OK  $AgentId skills: $($ExpectedSkills -join ', ')"
     & $Kbshff check --project-root $ProjectRoot --agent $AgentId --skip-mcp --skip-sandbox
     if ($LASTEXITCODE -ne 0) {
         throw "kbshff check $AgentId failed"
+    }
+}
+
+function Install-ConveyorProfiles([string]$Kbshff, [string]$ProjectRoot, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
+    Write-Step "Conveyor profiles (all skills)"
+    foreach ($agent in Get-ConveyorAgents) {
+        Invoke-KbshffProvider $Kbshff $ProjectRoot $agent.Id $agent.Skills $ProvBaseUrl $ProvModel $ProvKeyEnv
     }
 }
 
@@ -563,8 +591,7 @@ foreach ($name in @("KBSHFF_PROVIDER_BASE_URL", "KBSHFF_PROVIDER_MODEL", "KBSHFF
 Save-DotEnv $envPath $envMap
 Write-Host "Wrote $envPath"
 
-$checkRoot = Join-Path $ToolsDir ".kbshff-install"
-Invoke-KbshffProvider $kbshff $checkRoot "1c-analyst" $BaseUrl $Model $ApiKeyEnvName
+Install-ConveyorProfiles $kbshff $RepoRoot $BaseUrl $Model $ApiKeyEnvName
 
 Write-Step "harness dry-run"
 $oscript = Get-CommandPath "oscript"
@@ -574,9 +601,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "Install OK."
-Write-Host "Provider was applied with:"
-Write-Host "  kbshff config --project-root DIR --agent ID provider set --base-url ... --model ... --api-key-env $ApiKeyEnvName"
+Write-Host "Install OK. Conveyor is ready."
+Write-Host "Profiles with skills: 1c-analyst, 1c-yaxunit, 1c-coder, 1c-implementer"
 Write-Host "Live eval:  .\harness\run.ps1"
 Write-Host "Howto:      docs\howto-pipeline.md"
 Write-Host "CLI help:   kbshff help config"

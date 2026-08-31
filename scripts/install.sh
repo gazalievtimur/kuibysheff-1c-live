@@ -406,8 +406,10 @@ resolve_java_home() {
 
 apply_provider() {
   local kbshff="$1" project="$2" agent="$3" base="$4" model="$5" keyenv="$6"
-  local staging settings name
-  step "kbshff CLI: init / import / provider set / check ($agent)"
+  shift 6
+  local expected_skills=("$@")
+  local staging settings name listed skill
+  step "kbshff CLI: init / import skills / provider set / check ($agent)"
   mkdir -p "$project"
   "$kbshff" init "$agent" --project-root "$project" --force
   staging="$project/.kuibysheff/.1c-live-import/$agent"
@@ -415,12 +417,37 @@ apply_provider() {
   mkdir -p "$staging"
   settings="$REPO_ROOT/profiles/$agent"
   for name in master_prompt.md skills.dsl rules.md; do
-    [[ -f "$settings/$name" ]] && cp "$settings/$name" "$staging/$name"
+    if [[ ! -f "$settings/$name" ]]; then
+      echo "missing $settings/$name — conveyor profile $agent is incomplete" >&2
+      exit 1
+    fi
+    cp "$settings/$name" "$staging/$name"
   done
   "$kbshff" config --project-root "$project" --agent "$agent" import --from "$staging" --force
   "$kbshff" config --project-root "$project" --agent "$agent" provider set \
     --base-url "$base" --model "$model" --api-key-env "$keyenv"
+  listed="$("$kbshff" config --project-root "$project" --agent "$agent" --format json skill list)"
+  for skill in "${expected_skills[@]}"; do
+    if ! grep -F -q "$skill" <<<"$listed"; then
+      echo "skill '$skill' missing after import of $agent. skill list: $listed" >&2
+      exit 1
+    fi
+  done
+  echo "OK  $agent skills: ${expected_skills[*]}"
   "$kbshff" check --project-root "$project" --agent "$agent" --skip-mcp --skip-sandbox
+}
+
+install_conveyor_profiles() {
+  local kbshff="$1" project="$2" base="$3" model="$4" keyenv="$5"
+  step "Conveyor profiles (all skills)"
+  apply_provider "$kbshff" "$project" "1c-analyst" "$base" "$model" "$keyenv" \
+    workspace platform_help conf_docs code_index local_research web_search
+  apply_provider "$kbshff" "$project" "1c-yaxunit" "$base" "$model" "$keyenv" \
+    workspace yaxunit_docs platform_help code_index bsl_lint local_research web_search
+  apply_provider "$kbshff" "$project" "1c-coder" "$base" "$model" "$keyenv" \
+    workspace platform_help code_index bsl_lint local_research
+  apply_provider "$kbshff" "$project" "1c-implementer" "$base" "$model" "$keyenv" \
+    workspace platform_help code_index local_research bsl_lint
 }
 
 ENV_FILE="$REPO_ROOT/.env"
@@ -491,15 +518,14 @@ export SNTX_SEM_CONFIG BSL_INDEXER BSL_LS_MCP BSL_LS_JAR KBSHFF_BIN SNTX_SEM_PYT
 [[ -n "$JAVA_HOME_VAL" ]] && export JAVA_HOME="$JAVA_HOME_VAL"
 echo "Wrote $ENV_FILE"
 
-apply_provider "$KBSHFF_BIN" "$TOOLS_DIR/.kbshff-install" "1c-analyst" "$BASE_URL" "$MODEL" "$API_KEY_ENV_NAME"
+install_conveyor_profiles "$KBSHFF_BIN" "$REPO_ROOT" "$BASE_URL" "$MODEL" "$API_KEY_ENV_NAME"
 
 step "harness dry-run"
 oscript -encoding=utf-8 "$REPO_ROOT/harness/run.os" --repo-root "$REPO_ROOT" --dry-run
 
 echo ""
-echo "Install OK."
-echo "Provider was applied with:"
-echo "  kbshff config --project-root <DIR> --agent <ID> provider set --base-url ... --model ... --api-key-env $API_KEY_ENV_NAME"
+echo "Install OK. Conveyor is ready."
+echo "Profiles with skills: 1c-analyst, 1c-yaxunit, 1c-coder, 1c-implementer"
 echo "Live eval:  ./harness/run.sh"
 echo "Howto:      docs/howto-pipeline.md"
 echo "CLI help:   kbshff help config"

@@ -27,7 +27,8 @@
 ```powershell
 .\scripts\install.ps1
 # спросит base_url / model / api_key_env и ключ; поставит MCP в tools\;
-# применит провайдера: kbshff config … provider set
+# импортирует скилы всех четырёх профилей; применит provider set
+# после этого: .\harness\run.ps1
 .\harness\run.ps1 -DryRun
 .\harness\run.ps1
 ```

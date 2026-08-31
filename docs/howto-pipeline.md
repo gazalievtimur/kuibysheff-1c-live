@@ -26,8 +26,8 @@ chmod +x scripts/install.sh
 1. Спрашивает `base_url`, `model`, имя переменной ключа и **значение ключа** (не в argv).
 2. Ставит MCP-инструменты в `tools/` (или переиспользует уже заданные пути / соседние clone).
 3. Пишет `.env` (секреты и абсолютные пути).
-4. Применяет провайдера через CLI на проверочном проекте `tools/.kbshff-install`.
-5. Гоняет `oscript … harness/run.os --dry-run`.
+4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`): `init`, `config import` (`master_prompt.md` + **`skills.dsl`** + `rules.md`), `provider set`, проверка `skill list` и `check`. Профили пишутся в `.kuibysheff/` корня репозитория.
+5. Гоняет `oscript … harness/run.os --dry-run`. После этого конвейер готов: `.\harness\run.ps1` / `./harness/run.sh`.
 
 Ingest справки `1c-sntx-sem` опционален и требует путь к `bin` вашей лицензионной платформы 1С. Без индекса семантический поиск `sntx_sem` на live-прогоне не работает. HBK в репозиторий не кладётся.
 
@@ -52,7 +52,7 @@ kbshff run --project-root <DIR> --agent <ID> --home homes/<task>/<stage> --promp
 
 Ручной мастер provider/limits: `kbshff init <id> --project-root <DIR> --interactive`.
 
-Идентификаторы профилей этого gate: `1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`. Для import копируйте в staging **только** `master_prompt.md`, `skills.dsl`, `rules.md` из `profiles/<id>/` (так делает харнес). Не импортируйте `agent-config.example.yaml` целиком: там заглушки `REQUIRED_*` для MCP.
+Идентификаторы профилей этого gate: `1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`. Install импортирует скилы всех четырёх. Для ручного import копируйте в staging **`master_prompt.md`**, **`skills.dsl`**, **`rules.md`** из `profiles/<id>/` (так делает харнес; отсутствие любого файла — ошибка). Не импортируйте `agent-config.example.yaml` целиком: там заглушки `REQUIRED_*` для MCP.
 
 Переменные `.env`, которые читает харнес:
 
