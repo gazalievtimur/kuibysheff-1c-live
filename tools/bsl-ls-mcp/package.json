@@ -1,0 +1,11 @@
+{
+  "name": "bsl-ls-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "description": "stdio MCP bridge: tool analyze(srcDir) over bsl-language-server exec JAR",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
