@@ -73,6 +73,18 @@ function Read-DotEnv([string]$Path) {
     return $map
 }
 
+function Format-DotEnvValue([string]$Value) {
+    # dotenvy treats unquoted `\` as an escape (`C:\Git` fails at the first slash).
+    # Single quotes are literal in dotenvy and OneScript only strips matching quotes.
+    if ($Value -notmatch '[#''"\\\s]') {
+        return $Value
+    }
+    if ($Value.Contains("'")) {
+        throw "Cannot encode dotenv value with a single quote for both dotenvy and OneScript"
+    }
+    return "'$Value'"
+}
+
 function Save-DotEnv([string]$Path, [hashtable]$Map) {
     $order = @(
         "KBSHFF_PROVIDER_BASE_URL",
@@ -96,7 +108,7 @@ function Save-DotEnv([string]$Path, [hashtable]$Map) {
     $written = @{}
     foreach ($name in $order) {
         if ($Map.ContainsKey($name) -and -not [string]::IsNullOrWhiteSpace([string]$Map[$name])) {
-            $lines.Add("$name=$($Map[$name])")
+            $lines.Add("$name=$(Format-DotEnvValue ([string]$Map[$name]))")
             $written[$name] = $true
         }
     }
@@ -107,7 +119,7 @@ function Save-DotEnv([string]$Path, [hashtable]$Map) {
         if ([string]::IsNullOrWhiteSpace([string]$Map[$name])) {
             continue
         }
-        $lines.Add("$name=$($Map[$name])")
+        $lines.Add("$name=$(Format-DotEnvValue ([string]$Map[$name]))")
     }
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($Path, ($lines -join "`n") + "`n", $utf8)
@@ -170,31 +182,70 @@ function Find-Python {
     return @()
 }
 
-function Invoke-Python([string[]]$PythonCmd, [string[]]$Args, [string]$WorkDir = "") {
+function Invoke-NativeProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$WorkDir = "",
+        [string]$FailMessage = "",
+        [switch]$CaptureOutput
+    )
+    # PS 5.1: native stderr becomes a terminating error when ErrorActionPreference=Stop.
+    # Splatting arrays that start with "-m" also looks like a named parameter.
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $code = 0
+    $output = $null
+    try {
+        if ($WorkDir) {
+            Push-Location -LiteralPath $WorkDir
+        }
+        try {
+            if ($CaptureOutput) {
+                $output = & $FilePath @ArgumentList
+            }
+            else {
+                # Write-Host so native stdout does not pollute function return values.
+                & $FilePath @ArgumentList | ForEach-Object { Write-Host $_ }
+            }
+            $code = $LASTEXITCODE
+        }
+        finally {
+            if ($WorkDir) {
+                Pop-Location
+            }
+        }
+    }
+    finally {
+        $ErrorActionPreference = $oldEap
+    }
+    if ($code -ne 0) {
+        if ([string]::IsNullOrWhiteSpace($FailMessage)) {
+            $FailMessage = "$FilePath $($ArgumentList -join ' ') failed (exit $code)"
+        }
+        throw $FailMessage
+    }
+    if ($CaptureOutput) {
+        return $output
+    }
+}
+
+function Invoke-Python {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$PythonCmd,
+        [Parameter(Mandatory = $true)][string[]]$PythonArgs,
+        [string]$WorkDir = ""
+    )
+    if ($null -eq $PythonCmd -or $PythonCmd.Count -eq 0) {
+        throw "PythonCmd is empty"
+    }
+    $exe = $PythonCmd[0]
     $all = @()
     if ($PythonCmd.Count -gt 1) {
         $all += $PythonCmd[1..($PythonCmd.Count - 1)]
     }
-    $all += $Args
-    $exe = $PythonCmd[0]
-    if ($WorkDir) {
-        Push-Location $WorkDir
-        try {
-            & $exe @all
-            if ($LASTEXITCODE -ne 0) {
-                throw "$exe $($all -join ' ') failed (exit $LASTEXITCODE)"
-            }
-        }
-        finally {
-            Pop-Location
-        }
-    }
-    else {
-        & $exe @all
-        if ($LASTEXITCODE -ne 0) {
-            throw "$exe $($all -join ' ') failed (exit $LASTEXITCODE)"
-        }
-    }
+    $all += $PythonArgs
+    Invoke-NativeProcess -FilePath $exe -ArgumentList $all -WorkDir $WorkDir
 }
 
 function Get-GithubReleaseAsset([string]$Repo, [string]$NameMatch) {
@@ -253,10 +304,7 @@ function Ensure-Kbshff([hashtable]$EnvMap) {
         }
         $foundSrc = Join-Path $parent "Agent-Kuibysheff"
         Write-Host "Cloning Agent-Kuibysheff -> $foundSrc"
-        git clone --depth 1 "https://github.com/gazalievtimur/Agent-Kuibysheff.git" $foundSrc
-        if ($LASTEXITCODE -ne 0) {
-            throw "git clone Agent-Kuibysheff failed"
-        }
+        Invoke-NativeProcess -FilePath "git" -ArgumentList @("clone", "--depth", "1", "https://github.com/gazalievtimur/Agent-Kuibysheff.git", $foundSrc) -FailMessage "git clone Agent-Kuibysheff failed"
     }
     $releaseExe = Join-Path $foundSrc "target\release\kbshff.exe"
     $releaseBin = Join-Path $foundSrc "target\release\kbshff"
@@ -266,16 +314,7 @@ function Ensure-Kbshff([hashtable]$EnvMap) {
         throw "cargo not found (needed to build kbshff from $foundSrc)"
     }
     Write-Host "Building kbshff from $foundSrc"
-    Push-Location $foundSrc
-    try {
-        cargo build --release -p agent_Kuibysheff --bin kbshff
-        if ($LASTEXITCODE -ne 0) {
-            throw "cargo build kbshff failed"
-        }
-    }
-    finally {
-        Pop-Location
-    }
+    Invoke-NativeProcess -FilePath "cargo" -ArgumentList @("build", "--release", "-p", "agent_Kuibysheff", "--bin", "kbshff") -WorkDir $foundSrc -FailMessage "cargo build kbshff failed"
     if (Test-Path -LiteralPath $releaseExe) { return (Resolve-Path $releaseExe).Path }
     if (Test-Path -LiteralPath $releaseBin) { return (Resolve-Path $releaseBin).Path }
     throw "kbshff binary missing after cargo build under $foundSrc"
@@ -355,16 +394,7 @@ function Ensure-BslLsMcp([hashtable]$EnvMap) {
         if (-not (Test-Command "npm")) {
             throw "npm not found (needed for tools/bsl-ls-mcp). Install Node.js: https://nodejs.org/"
         }
-        Push-Location (Join-Path $ToolsDir "bsl-ls-mcp")
-        try {
-            npm install --omit=dev
-            if ($LASTEXITCODE -ne 0) {
-                throw "npm install failed in tools/bsl-ls-mcp"
-            }
-        }
-        finally {
-            Pop-Location
-        }
+        Invoke-NativeProcess -FilePath "npm" -ArgumentList @("install", "--omit=dev") -WorkDir (Join-Path $ToolsDir "bsl-ls-mcp") -FailMessage "npm install failed in tools/bsl-ls-mcp"
         $chosen = (Resolve-Path $vendorJs).Path
     }
     return $chosen
@@ -392,17 +422,14 @@ function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
         }
         $src = Join-Path $ToolsDir "1c-sntx-sem"
         Write-Host "Cloning 1c-sntx-sem -> $src"
-        git clone --depth 1 "https://github.com/gybson63/1c-sntx-sem.git" $src
-        if ($LASTEXITCODE -ne 0) {
-            throw "git clone 1c-sntx-sem failed"
-        }
+        Invoke-NativeProcess -FilePath "git" -ArgumentList @("clone", "--depth", "1", "https://github.com/gybson63/1c-sntx-sem.git", $src) -FailMessage "git clone 1c-sntx-sem failed"
     }
     $venvPy = Join-Path $src ".venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
-        Invoke-Python $PythonCmd @("-m", "venv", ".venv") $src
+        Invoke-Python -PythonCmd $PythonCmd -PythonArgs @("-m", "venv", ".venv") -WorkDir $src
     }
-    Invoke-Python @($venvPy) @("-m", "pip", "install", "-U", "pip")
-    Invoke-Python @($venvPy) @("-m", "pip", "install", "-e", ".") $src
+    Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-U", "pip")
+    Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-e", ".") -WorkDir $src
     $config = Join-Path $src "config.yaml"
     if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
         $example = Join-Path $src "config.yaml.example"
@@ -425,7 +452,7 @@ function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
             Write-Warning "Skipping ingest: no platform path. sntx_sem search will not work until you run: $venvPy -m sntx_sem ingest --platform-path PLATFORM_BIN"
         }
         else {
-            Invoke-Python @($venvPy) @("-m", "sntx_sem", "ingest", "--platform-path", $PlatformPath) $src
+            Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "sntx_sem", "ingest", "--platform-path", $PlatformPath) -WorkDir $src
         }
     }
     else {
@@ -446,11 +473,18 @@ function Resolve-JavaHome([hashtable]$EnvMap) {
     if (-not $java) {
         throw "java not found. Install JDK 17+: https://adoptium.net/"
     }
-    $probe = & java -XshowSettings:properties -version 2>&1 | Select-String "java.home"
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $probe = & java -XshowSettings:properties -version 2>&1 | Select-String "java.home"
+    }
+    finally {
+        $ErrorActionPreference = $oldEap
+    }
     if ($probe) {
-        $home = ($probe.ToString() -split "=", 2)[1].Trim()
-        if (Test-Path -LiteralPath $home -PathType Container) {
-            return $home
+        $javaHomeDir = ($probe.ToString() -split "=", 2)[1].Trim()
+        if (Test-Path -LiteralPath $javaHomeDir -PathType Container) {
+            return $javaHomeDir
         }
     }
     return ""
@@ -468,10 +502,7 @@ function Get-ConveyorAgents {
 function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$AgentId, [string[]]$ExpectedSkills, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
     Write-Step "kbshff CLI: init / import skills / provider set / check ($AgentId)"
     New-Item -ItemType Directory -Force -Path $ProjectRoot | Out-Null
-    & $Kbshff init $AgentId --project-root $ProjectRoot --force
-    if ($LASTEXITCODE -ne 0) {
-        throw "kbshff init $AgentId failed"
-    }
+    Invoke-NativeProcess -FilePath $Kbshff -ArgumentList @("init", $AgentId, "--project-root", $ProjectRoot, "--force") -FailMessage "kbshff init $AgentId failed"
     $staging = Join-Path $ProjectRoot ".kuibysheff\.1c-live-import\$AgentId"
     if (Test-Path -LiteralPath $staging) {
         Remove-Item -LiteralPath $staging -Recurse -Force
@@ -485,18 +516,9 @@ function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$A
         }
         Copy-Item -LiteralPath $src -Destination (Join-Path $staging $name) -Force
     }
-    & $Kbshff config --project-root $ProjectRoot --agent $AgentId import --from $staging --force
-    if ($LASTEXITCODE -ne 0) {
-        throw "kbshff config import $AgentId failed"
-    }
-    & $Kbshff config --project-root $ProjectRoot --agent $AgentId provider set --base-url $ProvBaseUrl --model $ProvModel --api-key-env $ProvKeyEnv
-    if ($LASTEXITCODE -ne 0) {
-        throw "kbshff config provider set $AgentId failed"
-    }
-    $listed = & $Kbshff config --project-root $ProjectRoot --agent $AgentId --format json skill list
-    if ($LASTEXITCODE -ne 0) {
-        throw "kbshff config skill list $AgentId failed"
-    }
+    Invoke-NativeProcess -FilePath $Kbshff -ArgumentList @("config", "--project-root", $ProjectRoot, "--agent", $AgentId, "import", "--from", $staging, "--force") -FailMessage "kbshff config import $AgentId failed"
+    Invoke-NativeProcess -FilePath $Kbshff -ArgumentList @("config", "--project-root", $ProjectRoot, "--agent", $AgentId, "provider", "set", "--base-url", $ProvBaseUrl, "--model", $ProvModel, "--api-key-env", $ProvKeyEnv) -FailMessage "kbshff config provider set $AgentId failed"
+    $listed = Invoke-NativeProcess -FilePath $Kbshff -ArgumentList @("config", "--project-root", $ProjectRoot, "--agent", $AgentId, "--format", "json", "skill", "list") -FailMessage "kbshff config skill list $AgentId failed" -CaptureOutput
     $listedText = ($listed | Out-String)
     foreach ($skill in $ExpectedSkills) {
         if ($listedText -notmatch [regex]::Escape($skill)) {
@@ -504,10 +526,7 @@ function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$A
         }
     }
     Write-Host "OK  $AgentId skills: $($ExpectedSkills -join ', ')"
-    & $Kbshff check --project-root $ProjectRoot --agent $AgentId --skip-mcp --skip-sandbox
-    if ($LASTEXITCODE -ne 0) {
-        throw "kbshff check $AgentId failed"
-    }
+    Invoke-NativeProcess -FilePath $Kbshff -ArgumentList @("check", "--project-root", $ProjectRoot, "--agent", $AgentId, "--skip-mcp", "--skip-sandbox") -FailMessage "kbshff check $AgentId failed"
 }
 
 function Install-ConveyorProfiles([string]$Kbshff, [string]$ProjectRoot, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
@@ -595,10 +614,7 @@ Install-ConveyorProfiles $kbshff $RepoRoot $BaseUrl $Model $ApiKeyEnvName
 
 Write-Step "harness dry-run"
 $oscript = Get-CommandPath "oscript"
-& $oscript -encoding=utf-8 (Join-Path $RepoRoot "harness\run.os") --repo-root $RepoRoot --dry-run
-if ($LASTEXITCODE -ne 0) {
-    throw "dry-run failed"
-}
+Invoke-NativeProcess -FilePath $oscript -ArgumentList @("-encoding=utf-8", (Join-Path $RepoRoot "harness\run.os"), "--repo-root", $RepoRoot, "--dry-run") -FailMessage "dry-run failed"
 
 Write-Host ""
 Write-Host "Install OK. Conveyor is ready."
