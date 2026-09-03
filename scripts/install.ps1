@@ -15,7 +15,8 @@ param(
     [string]$ModelCoder = "",
     [string]$ModelImplementer = "",
     [string]$ApiKeyEnvName = "",
-    [string]$PlatformPath = ""
+    [string]$PlatformPath = "",
+    [string]$OscriptVersion = "stable"
 )
 
 # Per-agent models (shared base_url / api_key). Populated by Read-ProviderSettings.
@@ -123,6 +124,7 @@ function Save-DotEnv([string]$Path, [hashtable]$Map) {
         "BSL_LS_JAR",
         "JAVA_HOME",
         "KBSHFF_BIN",
+        "OSCRIPT_BIN",
         "KUIBYSHEFF_SRC"
     )
     $lines = New-Object System.Collections.Generic.List[string]
@@ -297,6 +299,77 @@ function Invoke-Python {
     }
     $all += $PythonArgs
     Invoke-NativeProcess -FilePath $exe -ArgumentList $all -WorkDir $WorkDir
+}
+
+function Find-OscriptPath {
+    $fromPath = Get-CommandPath "oscript"
+    if ($fromPath) {
+        return $fromPath
+    }
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($env:OVM_INSTALL_PATH)) {
+        $candidates.Add((Join-Path $env:OVM_INSTALL_PATH "current\bin\oscript.exe"))
+        $candidates.Add((Join-Path $env:OVM_INSTALL_PATH "current\bin\oscript"))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $candidates.Add((Join-Path $env:LOCALAPPDATA "ovm\current\bin\oscript.exe"))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        $candidates.Add((Join-Path $env:USERPROFILE "ovm\current\bin\oscript.exe"))
+    }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $c).Path
+        }
+    }
+    return ""
+}
+
+function Ensure-Oscript {
+    Write-Step "OneScript (ovm)"
+    $existing = Find-OscriptPath
+    if ($existing) {
+        $binDir = Split-Path -Parent $existing
+        if ($env:Path -notlike ("*{0}*" -f $binDir)) {
+            $env:Path = "$binDir;$env:Path"
+        }
+        Write-Host "OK  oscript ($existing)"
+        return $existing
+    }
+
+    Write-Host "oscript не найден в PATH."
+    Write-Host "Установим OneScript через OVM: https://github.com/oscript-library/ovm"
+    Write-Host "Версия: $OscriptVersion (нужен .NET Framework 4.8+ для ovm.exe на Windows)."
+    if (-not $NonInteractive) {
+        $ans = Read-Host "Установить OneScript ($OscriptVersion) через ovm? [Y/n]"
+        if ($ans -match '^(?i)(n|no|н|нет)$') {
+            throw "oscript required. Install via OVM (docs/prerequisites.md) or re-run and accept install."
+        }
+    }
+    else {
+        Write-Host "NonInteractive: installing OneScript via ovm ($OscriptVersion)..."
+    }
+
+    $ovmDir = Join-Path $ToolsDir "ovm"
+    New-Item -ItemType Directory -Force -Path $ovmDir | Out-Null
+    $ovmExe = Join-Path $ovmDir "ovm.exe"
+    if (-not (Test-Path -LiteralPath $ovmExe -PathType Leaf)) {
+        $asset = Get-GithubReleaseAsset "oscript-library/ovm" "ovm.exe"
+        Save-RemoteFile -Uri $asset.browser_download_url -OutFile $ovmExe -Activity "ovm"
+    }
+
+    Invoke-NativeProcess -FilePath $ovmExe -ArgumentList @("install", $OscriptVersion) -FailMessage "ovm install $OscriptVersion failed"
+    Invoke-NativeProcess -FilePath $ovmExe -ArgumentList @("use", $OscriptVersion) -FailMessage "ovm use $OscriptVersion failed"
+
+    $existing = Find-OscriptPath
+    if (-not $existing) {
+        throw "oscript still not found after ovm install/use. Check OVM_INSTALL_PATH or open a new shell. docs/prerequisites.md"
+    }
+    $binDir = Split-Path -Parent $existing
+    $env:Path = "$binDir;$env:Path"
+    Write-Host "OK  oscript ($existing) via ovm"
+    Write-Host "Hint: add to user PATH for new shells: $binDir"
+    return $existing
 }
 
 function Get-GithubReleaseAsset([string]$Repo, [string]$NameMatch) {
@@ -853,9 +926,11 @@ function Read-ProviderSettings([hashtable]$EnvMap) {
 
 # --- main ---
 
+New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+
 Write-Step "Host tools"
-Require-HostTool "oscript" "Install OneScript 2.0: https://oscript.io/ - see docs/prerequisites.md"
 Require-HostTool "git" "https://git-scm.com/ - see docs/prerequisites.md"
+$oscriptBin = Ensure-Oscript
 $optionalGaps = New-Object System.Collections.Generic.List[string]
 if (Test-Command "node") {
     Write-Host "OK  node (recommended for BSL LS MCP)"
@@ -885,7 +960,6 @@ if (-not $SkipIngest -and -not $PlatformPath) {
 }
 Confirm-OptionalHostGaps @($optionalGaps)
 
-New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
 $envPath = Join-Path $RepoRoot ".env"
 $envMap = Read-DotEnv $envPath
 
@@ -925,6 +999,7 @@ $envMap["CODE_INDEX_HOME"] = Split-Path -Parent $indexer
 if ($mcpJs) { $envMap["BSL_LS_MCP"] = $mcpJs } else { $envMap.Remove("BSL_LS_MCP") }
 if ($jar) { $envMap["BSL_LS_JAR"] = $jar } else { $envMap.Remove("BSL_LS_JAR") }
 $envMap["KBSHFF_BIN"] = $kbshff
+$envMap["OSCRIPT_BIN"] = $oscriptBin
 if ($javaHome) {
     $envMap["JAVA_HOME"] = $javaHome
     [Environment]::SetEnvironmentVariable("JAVA_HOME", $javaHome, "Process")
@@ -934,7 +1009,7 @@ $exportNames = @(
     "KBSHFF_PROVIDER_MODEL_1C_ANALYST", "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT",
     "KBSHFF_PROVIDER_MODEL_1C_CODER", "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER",
     "KBSHFF_PROVIDER_API_KEY_ENV", "SNTX_SEM_CONFIG", "SNTX_SEM_PYTHON",
-    "BSL_INDEXER", "KBSHFF_BIN"
+    "BSL_INDEXER", "KBSHFF_BIN", "OSCRIPT_BIN"
 )
 foreach ($name in $exportNames) {
     [Environment]::SetEnvironmentVariable($name, $envMap[$name], "Process")
@@ -948,8 +1023,7 @@ Write-Host "Wrote $envPath"
 Install-ConveyorProfiles $kbshff $RepoRoot $BaseUrl $script:AgentModels $ApiKeyEnvName
 
 Write-Step "harness dry-run"
-$oscript = Get-CommandPath "oscript"
-Invoke-NativeProcess -FilePath $oscript -ArgumentList @("-encoding=utf-8", (Join-Path $RepoRoot "harness\run.os"), "--repo-root", $RepoRoot, "--dry-run") -FailMessage "dry-run failed"
+Invoke-NativeProcess -FilePath $oscriptBin -ArgumentList @("-encoding=utf-8", (Join-Path $RepoRoot "harness\run.os"), "--repo-root", $RepoRoot, "--dry-run") -FailMessage "dry-run failed"
 
 Write-Host ""
 Write-Host "Install OK. Conveyor is ready."

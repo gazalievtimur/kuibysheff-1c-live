@@ -14,7 +14,7 @@
 
 **Обязательно**
 
-- [OneScript](https://oscript.io/) 2.0 (`oscript` в `PATH`). Канон оркестратора: `oscript -encoding=utf-8 harness/run.os`. OPM-пакеты не нужны.
+- [OneScript](https://oscript.io/) 2.x (`oscript` в `PATH`) — или install поставит через [OVM](https://github.com/oscript-library/ovm) (`stable` по умолчанию)
 - Git, Python 3 (runtime MCP `sntx_sem`), curl; на Linux ещё `unzip` для zip `kbshff`
 - `kbshff` в `PATH`, либо `KBSHFF_BIN`, либо install скачает release в `tools/` (Windows/Linux x86_64). `cargo` — только fallback, если release недоступен
 - API-ключ провайдера в env (имя по умолчанию — плейсхолдер `OPENAI_API_KEY`). Параметры модели — через CLI `kbshff config … provider set`, не правкой protected YAML. Справка: `kbshff help config`
@@ -36,7 +36,7 @@ Install — машинный bootstrap: хост-проверки, MCP в `tools
 
 ### Что подготовить
 
-Сначала поставьте хост-инструменты по **[docs/prerequisites.md](docs/prerequisites.md)** (OneScript, Git, Python 3, curl; Node/Java — по желанию для штатного BSL LS). На Linux для распаковки `kbshff` нужен ещё `unzip`.
+Сначала поставьте Git / Python / curl по **[docs/prerequisites.md](docs/prerequisites.md)** (Node/Java — по желанию). **OneScript** при отсутствии install поставит через [OVM](https://github.com/oscript-library/ovm). На Linux нужен ещё `unzip` (и Mono, если качается `ovm.exe`).
 
 CLI агента: install сам найдёт `kbshff` в `PATH` / `KBSHFF_BIN` / соседнем checkout или **скачает** готовый бинарь из [GitHub Releases](https://github.com/gazalievtimur/Agent-Kuibysheff/releases) в `tools/` (Windows и Linux x86_64; без системных прав). `cargo` нужен только если release недоступен.
 
@@ -57,7 +57,7 @@ Windows: не меняйте ExecutionPolicy машины. Запускайте 
 
 ### Что делает скрипт
 
-1. Проверяет хост-инструменты.
+1. Проверяет хост-инструменты; при отсутствии `oscript` предлагает установить OneScript через OVM (`tools/ovm/ovm.exe`).
 2. Спрашивает провайдера (общий `base_url`/ключ + модель на каждого агента) и пишет `.env` (ключ и абсолютные пути к MCP; Windows-пути в кавычках для dotenvy).
 3. Ставит или находит `kbshff` (release → `tools/`), `bsl-indexer`, Python-venv `1c-sntx-sem`; при наличии Node/Java — JAR `bsl-language-server` и Node-мост `tools/bsl-ls-mcp` (иначе пропускает с предупреждением). Долгие загрузки — с progress bar (`curl`).
 4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`), счётчик `[n/4]`: `kbshff init`, `config import` (`master_prompt.md` + `skills.dsl` + `rules.md`), `provider set` (своя модель), `skill list`, `check`. Профили — в `.kuibysheff/` корня репозитория.
@@ -69,7 +69,7 @@ Windows: не меняйте ExecutionPolicy машины. Запускайте 
 
 ```powershell
 .\scripts\install.cmd
-# флаги: -SkipIngest -NonInteractive -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin"
+# флаги: -SkipIngest -NonInteractive -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin" -OscriptVersion stable
 .\harness\run.cmd -DryRun
 .\harness\run.cmd
 ```
@@ -77,7 +77,7 @@ Windows: не меняйте ExecutionPolicy машины. Запускайте 
 ```bash
 chmod +x scripts/install.sh
 ./scripts/install.sh
-# --skip-ingest --non-interactive --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin
+# --skip-ingest --non-interactive --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin --oscript-version stable
 oscript -encoding=utf-8 harness/run.os --dry-run
 # канон оркестратора без обёртки; install.sh уже гоняет это в конце
 ./harness/run.sh

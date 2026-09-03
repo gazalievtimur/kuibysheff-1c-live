@@ -14,6 +14,7 @@ MODEL_CODER=""
 MODEL_IMPLEMENTER=""
 API_KEY_ENV_NAME=""
 PLATFORM_PATH=""
+OSCRIPT_VERSION="stable"
 
 usage() {
   cat <<'EOF'
@@ -22,6 +23,7 @@ Usage: scripts/install.sh [--repo-root DIR] [--tools-dir DIR] [--skip-ingest]
                           [--model-analyst NAME] [--model-yaxunit NAME]
                           [--model-coder NAME] [--model-implementer NAME]
                           [--api-key-env NAME] [--platform-path DIR]
+                          [--oscript-version VERSION]
 EOF
 }
 
@@ -39,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --model-implementer) MODEL_IMPLEMENTER="$2"; shift 2 ;;
     --api-key-env) API_KEY_ENV_NAME="$2"; shift 2 ;;
     --platform-path) PLATFORM_PATH="$2"; shift 2 ;;
+    --oscript-version) OSCRIPT_VERSION="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -169,6 +172,7 @@ preferred = [
     "BSL_LS_JAR",
     "JAVA_HOME",
     "KBSHFF_BIN",
+    "OSCRIPT_BIN",
     "KUIBYSHEFF_SRC",
 ]
 for raw in os.environ.get("UPDATES", "").splitlines():
@@ -272,6 +276,91 @@ kbshff_release_glob() {
       echo ""
       ;;
   esac
+}
+
+find_oscript() {
+  if have oscript; then
+    command -v oscript
+    return
+  fi
+  local c
+  for c in \
+    ${OVM_INSTALL_PATH:+"$OVM_INSTALL_PATH/current/bin/oscript"} \
+    "$HOME/ovm/current/bin/oscript" \
+    "$HOME/.local/share/ovm/current/bin/oscript" \
+    "$HOME/.ovm/current/bin/oscript" \
+    "${LOCALAPPDATA:+$LOCALAPPDATA/ovm/current/bin/oscript.exe}" \
+    "$HOME/ovm/current/bin/oscript.exe"; do
+    if [[ -n "$c" && -x "$c" ]]; then
+      printf '%s' "$c"
+      return
+    fi
+  done
+  printf ''
+}
+
+run_ovm() {
+  local ovm_exe="$1"
+  shift
+  local uname_s
+  uname_s="$(uname -s)"
+  case "$uname_s" in
+    MINGW*|MSYS*|CYGWIN*)
+      "$ovm_exe" "$@"
+      ;;
+    *)
+      have mono || {
+        echo "mono not found (needed to run ovm.exe on Linux/macOS). Install Mono 6+ or OneScript manually. docs/prerequisites.md" >&2
+        exit 1
+      }
+      mono "$ovm_exe" "$@"
+      ;;
+  esac
+}
+
+ensure_oscript() {
+  step "OneScript (ovm)"
+  local existing ovm_dir ovm_exe bin_dir ans
+  existing="$(find_oscript)"
+  if [[ -n "$existing" ]]; then
+    bin_dir="$(cd "$(dirname "$existing")" && pwd)"
+    export PATH="$bin_dir:$PATH"
+    echo "OK  oscript ($existing)"
+    printf '%s' "$existing"
+    return
+  fi
+  echo "oscript не найден в PATH."
+  echo "Установим OneScript через OVM: https://github.com/oscript-library/ovm"
+  echo "Версия: $OSCRIPT_VERSION (на Linux/macOS для ovm.exe нужен Mono 6+)."
+  if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
+    read -r -p "Установить OneScript ($OSCRIPT_VERSION) через ovm? [Y/n]: " ans || true
+    case "$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')" in
+      n|no|н|нет)
+        echo "oscript required. Install via OVM (docs/prerequisites.md) or re-run and accept install." >&2
+        exit 1
+        ;;
+    esac
+  else
+    echo "NonInteractive: installing OneScript via ovm ($OSCRIPT_VERSION)..."
+  fi
+  ovm_dir="$TOOLS_DIR/ovm"
+  mkdir -p "$ovm_dir"
+  ovm_exe="$ovm_dir/ovm.exe"
+  if [[ ! -f "$ovm_exe" ]]; then
+    download_file "$(github_asset_url oscript-library/ovm 'ovm.exe')" "$ovm_exe" "ovm"
+  fi
+  run_ovm "$ovm_exe" install "$OSCRIPT_VERSION"
+  run_ovm "$ovm_exe" use "$OSCRIPT_VERSION"
+  existing="$(find_oscript)"
+  if [[ -z "$existing" ]]; then
+    echo "oscript still not found after ovm install/use. Check OVM_INSTALL_PATH. docs/prerequisites.md" >&2
+    exit 1
+  fi
+  bin_dir="$(cd "$(dirname "$existing")" && pwd)"
+  export PATH="$bin_dir:$PATH"
+  echo "OK  oscript ($existing) via ovm"
+  echo "Hint: add to PATH for new shells: $bin_dir"
+  printf '%s' "$existing"
 }
 
 install_kbshff_from_release() {
@@ -667,8 +756,11 @@ ENV_FILE="$REPO_ROOT/.env"
 mkdir -p "$TOOLS_DIR"
 
 step "Host tools"
-require_host oscript "Install OneScript 2.0: https://oscript.io/ — see docs/prerequisites.md"
 require_host git "https://git-scm.com/ — see docs/prerequisites.md"
+require_host curl "curl is required to download GitHub releases"
+have unzip || { echo "unzip not found (needed to extract kbshff / ovm packages). docs/prerequisites.md" >&2; exit 1; }
+echo "OK  unzip"
+OSCRIPT_BIN="$(ensure_oscript)"
 OPTIONAL_GAPS=()
 if have node; then
   echo "OK  node (recommended for BSL LS MCP)"
@@ -681,9 +773,6 @@ else
   OPTIONAL_GAPS+=("Java / JDK 17+ — запуск bsl-language-server JAR. https://adoptium.net/  (docs/prerequisites.md)")
 fi
 require_host python3 "Python 3 is required for 1c-sntx-sem. docs/prerequisites.md"
-require_host curl "curl is required to download GitHub releases"
-have unzip || { echo "unzip not found (needed to extract kbshff release). docs/prerequisites.md" >&2; exit 1; }
-echo "OK  unzip"
 if [[ "$SKIP_INGEST" -eq 0 && -z "$PLATFORM_PATH" ]]; then
   mapfile -t _platform_bins < <(find_1c_platform_bins)
   if [[ "${#_platform_bins[@]}" -eq 0 ]]; then
@@ -796,6 +885,7 @@ fi
   echo "BSL_LS_MCP=$BSL_LS_MCP"
   echo "BSL_LS_JAR=$BSL_LS_JAR"
   echo "KBSHFF_BIN=$KBSHFF_BIN"
+  echo "OSCRIPT_BIN=$OSCRIPT_BIN"
   echo "JAVA_HOME=$JAVA_HOME_VAL"
 } | dotenv_set_many "$ENV_FILE"
 
@@ -806,7 +896,7 @@ export KBSHFF_PROVIDER_MODEL_1C_YAXUNIT="${AGENT_MODELS[1c-yaxunit]}"
 export KBSHFF_PROVIDER_MODEL_1C_CODER="${AGENT_MODELS[1c-coder]}"
 export KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER="${AGENT_MODELS[1c-implementer]}"
 export KBSHFF_PROVIDER_API_KEY_ENV="$API_KEY_ENV_NAME"
-export SNTX_SEM_CONFIG BSL_INDEXER KBSHFF_BIN SNTX_SEM_PYTHON
+export SNTX_SEM_CONFIG BSL_INDEXER KBSHFF_BIN OSCRIPT_BIN SNTX_SEM_PYTHON
 [[ -n "$BSL_LS_MCP" ]] && export BSL_LS_MCP
 [[ -n "$BSL_LS_JAR" ]] && export BSL_LS_JAR
 [[ -n "$JAVA_HOME_VAL" ]] && export JAVA_HOME="$JAVA_HOME_VAL"
@@ -815,7 +905,7 @@ echo "Wrote $ENV_FILE"
 install_conveyor_profiles "$KBSHFF_BIN" "$REPO_ROOT" "$BASE_URL" "$API_KEY_ENV_NAME"
 
 step "harness dry-run"
-oscript -encoding=utf-8 "$REPO_ROOT/harness/run.os" --repo-root "$REPO_ROOT" --dry-run
+"$OSCRIPT_BIN" -encoding=utf-8 "$REPO_ROOT/harness/run.os" --repo-root "$REPO_ROOT" --dry-run
 
 echo ""
 echo "Install OK. Conveyor is ready."

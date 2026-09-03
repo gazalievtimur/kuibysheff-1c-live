@@ -10,25 +10,25 @@
 
 Предустановка хост-инструментов (ссылки, что обязательно / что опционально): **[prerequisites.md](prerequisites.md)**.
 
-В `PATH` для install: OneScript 2.0, Git, Python 3, curl (`unzip` на Linux). **Node.js**, **Java 17+** и **bin платформы 1С** рекомендуются для полного стека; если их нет — install предупредит и спросит, продолжать ли (`docs/prerequisites.md`). `kbshff` install скачает из GitHub Releases в `tools/` (Windows/Linux x86_64); `cargo` — только fallback.
+В `PATH` для install: Git, Python 3, curl (`unzip` на Linux). **OneScript** install поставит через [OVM](https://github.com/oscript-library/ovm), если его ещё нет (`-OscriptVersion` / `--oscript-version`, по умолчанию `stable`). **Node.js**, **Java 17+** и **bin платформы 1С** рекомендуются для полного стека; если их нет — предупреждение и вопрос, продолжать ли ([prerequisites.md](prerequisites.md)). `kbshff` — из GitHub Releases в `tools/`; `cargo` — только fallback.
 
 ```powershell
 .\scripts\install.cmd
 # если ExecutionPolicy=Restricted: не меняйте политику машины, запускайте .cmd
 # или: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
-# флаги: -SkipIngest -NonInteractive -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin"
+# флаги: -SkipIngest -NonInteractive -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin" -OscriptVersion stable
 ```
 
 ```bash
 chmod +x scripts/install.sh
 ./scripts/install.sh
-# --skip-ingest --non-interactive --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin
+# --skip-ingest --non-interactive --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin --oscript-version stable
 ```
 
 Скрипт:
 
 1. Спрашивает общий `base_url`, имя/значение ключа и **отдельную модель** для каждого из четырёх агентов (пояснения; ключ не в argv).
-2. Ставит MCP-инструменты и при необходимости `kbshff` в `tools/` (progress bar на загрузках) или переиспользует уже заданные пути / соседние clone. Штатный BSL LS (Node + JAR) ставится только если доступны Node/npm (иначе пропуск).
+2. Ставит MCP-инструменты и при необходимости `kbshff` / OneScript (OVM) в `tools/` (progress bar на загрузках) или переиспользует уже заданные пути / соседние clone. Штатный BSL LS (Node + JAR) ставится только если доступны Node/npm (иначе пропуск).
 3. Пишет `.env` (секреты и абсолютные пути).
 4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`), `[n/4]`: `init`, `config import` (`master_prompt.md` + **`skills.dsl`** + `rules.md`), `provider set` со своей моделью, проверка `skill list` и `check`. Профили пишутся в `.kuibysheff/` корня репозитория.
 5. Гоняет `oscript … harness/run.os --dry-run`. После этого конвейер готов: `.\harness\run.cmd` / `./harness/run.sh`.
