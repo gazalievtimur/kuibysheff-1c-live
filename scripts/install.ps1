@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Bootstrap kuibysheff-1c-live: host checks, MCP tools, .env secrets, kbshff CLI provider.
@@ -32,6 +32,13 @@ $GithubHeaders = @{ "User-Agent" = "kuibysheff-1c-live-install" }
 
 function Write-Step([string]$Message) {
     Write-Host "==> $Message"
+}
+
+function Write-Hint([string]$Message) {
+    if ($NonInteractive) {
+        return
+    }
+    Write-Host $Message
 }
 
 function Test-Command([string]$Name) {
@@ -257,6 +264,39 @@ function Get-GithubReleaseAsset([string]$Repo, [string]$NameMatch) {
     return $asset
 }
 
+function Save-RemoteFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$OutFile,
+        [string]$Activity = "Downloading"
+    )
+    Write-Host "Downloading $Uri"
+    $curl = Get-CommandPath "curl.exe"
+    if ($curl) {
+        $oldEap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $curl -fL --progress-bar -A "kuibysheff-1c-live-install" -o $OutFile $Uri
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl download failed (exit $LASTEXITCODE): $Uri"
+            }
+        }
+        finally {
+            $ErrorActionPreference = $oldEap
+        }
+        return
+    }
+    Write-Host "(curl.exe not found; download without progress bar: $Activity)"
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -Headers $GithubHeaders -UseBasicParsing
+    }
+    finally {
+        $ErrorActionPreference = $oldEap
+    }
+}
+
 function Expand-ZipTo([string]$ZipPath, [string]$Dest) {
     New-Item -ItemType Directory -Force -Path $Dest | Out-Null
     Expand-Archive -LiteralPath $ZipPath -DestinationPath $Dest -Force
@@ -270,11 +310,52 @@ function Find-FileUnder([string]$Root, [string]$FileName) {
     return $hit.FullName
 }
 
+function Install-KbshffFromRelease {
+    $stable = Join-Path $ToolsDir "kbshff.exe"
+    $asset = Get-GithubReleaseAsset "gazalievtimur/Agent-Kuibysheff" "agent_Kuibysheff-*-x86_64-pc-windows-msvc.zip"
+    $zip = Join-Path $env:TEMP "kbshff-windows-msvc.zip"
+    $extract = Join-Path $env:TEMP "kbshff-windows-msvc-extract"
+    if (Test-Path -LiteralPath $extract) {
+        Remove-Item -LiteralPath $extract -Recurse -Force
+    }
+    Save-RemoteFile -Uri $asset.browser_download_url -OutFile $zip -Activity "kbshff release"
+    $shaAsset = $null
+    try {
+        $shaAsset = Get-GithubReleaseAsset "gazalievtimur/Agent-Kuibysheff" "agent_Kuibysheff-*-x86_64-pc-windows-msvc.zip.sha256"
+    }
+    catch {
+        Write-Warning "No .sha256 asset for kbshff release; skipping checksum"
+    }
+    if ($shaAsset) {
+        $shaFile = Join-Path $env:TEMP "kbshff-windows-msvc.zip.sha256"
+        Save-RemoteFile -Uri $shaAsset.browser_download_url -OutFile $shaFile -Activity "kbshff checksum"
+        $expected = ((Get-Content -LiteralPath $shaFile -Raw) -split '\s+')[0].Trim().ToLowerInvariant()
+        $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($expected -and $expected -ne $actual) {
+            throw "kbshff zip SHA256 mismatch (expected $expected, got $actual)"
+        }
+        Write-Host "OK  kbshff SHA256"
+    }
+    Expand-ZipTo $zip $extract
+    $found = Find-FileUnder $extract "kbshff.exe"
+    if (-not $found) {
+        throw "kbshff.exe not found in release archive"
+    }
+    New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+    Copy-Item -LiteralPath $found -Destination $stable -Force
+    Write-Host "Installed kbshff -> $stable"
+    return (Resolve-Path $stable).Path
+}
+
 function Ensure-Kbshff([hashtable]$EnvMap) {
     Write-Step "kbshff"
     $explicit = Get-EnvOrMap $EnvMap "KBSHFF_BIN"
     if ($explicit -and (Test-Path -LiteralPath $explicit -PathType Leaf)) {
         return (Resolve-Path -LiteralPath $explicit).Path
+    }
+    $vendored = Join-Path $ToolsDir "kbshff.exe"
+    if (Test-Path -LiteralPath $vendored -PathType Leaf) {
+        return (Resolve-Path $vendored).Path
     }
     $fromPath = Get-CommandPath "kbshff"
     if ($fromPath) {
@@ -292,8 +373,18 @@ function Ensure-Kbshff([hashtable]$EnvMap) {
     foreach ($c in $candidates) {
         if (Test-Path -LiteralPath (Join-Path $c "Cargo.toml") -PathType Leaf) {
             $foundSrc = (Resolve-Path -LiteralPath $c).Path
+            $releaseExe = Join-Path $foundSrc "target\release\kbshff.exe"
+            $releaseBin = Join-Path $foundSrc "target\release\kbshff"
+            if (Test-Path -LiteralPath $releaseExe) { return (Resolve-Path $releaseExe).Path }
+            if (Test-Path -LiteralPath $releaseBin) { return (Resolve-Path $releaseBin).Path }
             break
         }
+    }
+    try {
+        return Install-KbshffFromRelease
+    }
+    catch {
+        Write-Warning "GitHub release download failed: $($_.Exception.Message)"
     }
     if (-not $foundSrc) {
         if (-not (Test-Command "git")) {
@@ -338,8 +429,7 @@ function Ensure-BslIndexer([hashtable]$EnvMap) {
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
     $asset = Get-GithubReleaseAsset "Regsorm/code-index-mcp" "bsl-indexer-windows-x64.zip"
     $zip = Join-Path $env:TEMP "bsl-indexer-windows-x64.zip"
-    Write-Host "Downloading $($asset.browser_download_url)"
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -Headers $GithubHeaders
+    Save-RemoteFile -Uri $asset.browser_download_url -OutFile $zip -Activity "bsl-indexer"
     Expand-ZipTo $zip $dest
     $found = Find-FileUnder $dest "bsl-indexer.exe"
     if (-not $found) {
@@ -368,8 +458,7 @@ function Ensure-BslLsJar([hashtable]$EnvMap) {
     }
     New-Item -ItemType Directory -Force -Path (Split-Path $stable) | Out-Null
     $asset = Get-GithubReleaseAsset "1c-syntax/bsl-language-server" "*-exec.jar"
-    Write-Host "Downloading $($asset.browser_download_url)"
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $stable -Headers $GithubHeaders
+    Save-RemoteFile -Uri $asset.browser_download_url -OutFile $stable -Activity "bsl-language-server JAR"
     return (Resolve-Path $stable).Path
 }
 
@@ -398,6 +487,79 @@ function Ensure-BslLsMcp([hashtable]$EnvMap) {
         $chosen = (Resolve-Path $vendorJs).Path
     }
     return $chosen
+}
+
+function Find-1cPlatformBins {
+    $bins = New-Object System.Collections.Generic.List[string]
+    $roots = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        $roots.Add((Join-Path $env:ProgramFiles "1cv8"))
+    }
+    $pf86 = ${env:ProgramFiles(x86)}
+    if (-not [string]::IsNullOrWhiteSpace($pf86)) {
+        $roots.Add((Join-Path $pf86 "1cv8"))
+    }
+    foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+            continue
+        }
+        Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "8.3.*" } |
+            ForEach-Object {
+                $bin = Join-Path $_.FullName "bin"
+                if (-not (Test-Path -LiteralPath $bin -PathType Container)) {
+                    return
+                }
+                $has = (Test-Path -LiteralPath (Join-Path $bin "1cv8.exe")) -or (Test-Path -LiteralPath (Join-Path $bin "ibcmd.exe"))
+                if ($has) {
+                    $bins.Add((Resolve-Path -LiteralPath $bin).Path)
+                }
+            }
+    }
+    return @($bins | Sort-Object -Descending)
+}
+
+function Select-PlatformBinForIngest {
+    if ($PlatformPath) {
+        return $PlatformPath
+    }
+    if ($NonInteractive) {
+        return ""
+    }
+    Write-Hint ""
+    Write-Hint "Ingest строит индекс справки платформы для MCP sntx_sem (поиск синтаксиса/справки на live-прогоне)."
+    Write-Hint "Нужен каталог bin вашей лицензионной платформы 1С (обычно ...\1cv8\8.3.xx\bin)."
+    Write-Hint "HBK в репозиторий не копируется."
+    $found = @(Find-1cPlatformBins)
+    if ($found.Count -eq 0) {
+        Write-Hint "Установленные 8.3.*\bin не найдены автоматически."
+        $answer = Read-Host "Run sntx_sem ingest? Enter path to platform bin, or leave empty to skip"
+        return $answer
+    }
+    Write-Host "Найдены каталоги bin платформы:"
+    for ($i = 0; $i -lt $found.Count; $i++) {
+        Write-Host ("  [{0}] {1}" -f ($i + 1), $found[$i])
+    }
+    $manualIdx = $found.Count + 1
+    $skipIdx = $found.Count + 2
+    Write-Host ("  [{0}] ввести путь вручную" -f $manualIdx)
+    Write-Host ("  [{0}] пропустить ingest" -f $skipIdx)
+    $choice = Read-Host "Выбор [1]"
+    if ([string]::IsNullOrWhiteSpace($choice)) {
+        $choice = "1"
+    }
+    $n = 0
+    if (-not [int]::TryParse($choice, [ref]$n)) {
+        Write-Warning "Неверный выбор - ingest пропущен"
+        return ""
+    }
+    if ($n -ge 1 -and $n -le $found.Count) {
+        return $found[$n - 1]
+    }
+    if ($n -eq $manualIdx) {
+        return Read-Default "Path to 1C platform bin" ""
+    }
+    return ""
 }
 
 function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
@@ -440,19 +602,16 @@ function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
         Write-Host "Created $config from example. Edit local_configs / ingest as needed."
     }
     $doIngest = -not $SkipIngest
-    if ($doIngest -and -not $NonInteractive) {
-        $answer = Read-Host "Run sntx_sem ingest from a 1C platform bin folder? [y/N]"
-        $doIngest = $answer -match '^[Yy]'
-    }
+    $chosenPlatform = $PlatformPath
     if ($doIngest) {
-        if (-not $PlatformPath) {
-            $PlatformPath = Read-Default "Path to 1C platform bin (v8 8.3.x bin folder)" ""
+        if (-not $chosenPlatform) {
+            $chosenPlatform = Select-PlatformBinForIngest
         }
-        if ([string]::IsNullOrWhiteSpace($PlatformPath)) {
+        if ([string]::IsNullOrWhiteSpace($chosenPlatform)) {
             Write-Warning "Skipping ingest: no platform path. sntx_sem search will not work until you run: $venvPy -m sntx_sem ingest --platform-path PLATFORM_BIN"
         }
         else {
-            Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "sntx_sem", "ingest", "--platform-path", $PlatformPath) -WorkDir $src
+            Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "sntx_sem", "ingest", "--platform-path", $chosenPlatform) -WorkDir $src
         }
     }
     else {
@@ -481,13 +640,20 @@ function Resolve-JavaHome([hashtable]$EnvMap) {
     finally {
         $ErrorActionPreference = $oldEap
     }
+    $detected = ""
     if ($probe) {
         $javaHomeDir = ($probe.ToString() -split "=", 2)[1].Trim()
         if (Test-Path -LiteralPath $javaHomeDir -PathType Container) {
-            return $javaHomeDir
+            $detected = $javaHomeDir
         }
     }
-    return ""
+    if ($NonInteractive -or -not $detected) {
+        return $detected
+    }
+    Write-Hint ""
+    Write-Hint "JAVA_HOME нужен MCP bsl-language-server (анализ BSL)."
+    Write-Hint "Обнаружен Java home: $detected"
+    return Read-Default "JAVA_HOME" $detected
 }
 
 function Get-ConveyorAgents {
@@ -499,8 +665,12 @@ function Get-ConveyorAgents {
     )
 }
 
-function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$AgentId, [string[]]$ExpectedSkills, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
-    Write-Step "kbshff CLI: init / import skills / provider set / check ($AgentId)"
+function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$AgentId, [string[]]$ExpectedSkills, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv, [string]$StepLabel = "") {
+    $title = "kbshff CLI: init / import skills / provider set / check ($AgentId)"
+    if ($StepLabel) {
+        $title = "$StepLabel $title"
+    }
+    Write-Step $title
     New-Item -ItemType Directory -Force -Path $ProjectRoot | Out-Null
     Invoke-NativeProcess -FilePath $Kbshff -ArgumentList @("init", $AgentId, "--project-root", $ProjectRoot, "--force") -FailMessage "kbshff init $AgentId failed"
     $staging = Join-Path $ProjectRoot ".kuibysheff\.1c-live-import\$AgentId"
@@ -531,9 +701,62 @@ function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$A
 
 function Install-ConveyorProfiles([string]$Kbshff, [string]$ProjectRoot, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
     Write-Step "Conveyor profiles (all skills)"
-    foreach ($agent in Get-ConveyorAgents) {
-        Invoke-KbshffProvider $Kbshff $ProjectRoot $agent.Id $agent.Skills $ProvBaseUrl $ProvModel $ProvKeyEnv
+    $agents = Get-ConveyorAgents
+    $total = $agents.Count
+    $i = 0
+    foreach ($agent in $agents) {
+        $i++
+        Invoke-KbshffProvider $Kbshff $ProjectRoot $agent.Id $agent.Skills $ProvBaseUrl $ProvModel $ProvKeyEnv "[$i/$total]"
     }
+}
+
+function Read-ProviderSettings([hashtable]$EnvMap) {
+    Write-Step "AI provider"
+    if (-not $NonInteractive) {
+        Write-Host ""
+        Write-Host "Нужен любой OpenAI-compatible HTTP API (Chat Completions)."
+        Write-Host "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
+        Write-Host "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
+        Write-Host "Значения по умолчанию - плейсхолдеры формата, не рекомендация конкретного вендора."
+        Write-Host ""
+    }
+    if (-not $script:BaseUrl) {
+        $script:BaseUrl = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_BASE_URL"
+        if (-not $script:BaseUrl) { $script:BaseUrl = "https://api.openai.com/v1" }
+        Write-Hint "base_url - URL эндпоинта до /v1, куда kbshff шлёт запросы к модели."
+        Write-Hint "Пример формата: https://api.example.com/v1"
+        $script:BaseUrl = Read-Default "Provider base_url" $script:BaseUrl
+    }
+    if (-not $script:Model) {
+        $script:Model = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_MODEL"
+        if (-not $script:Model) { $script:Model = "gpt-4o" }
+        Write-Hint ""
+        Write-Hint "model - идентификатор модели у вашего провайдера (как в его API / кабинете)."
+        Write-Hint "Пример формата: gpt-4o"
+        $script:Model = Read-Default "Model" $script:Model
+    }
+    if (-not $script:ApiKeyEnvName) {
+        $script:ApiKeyEnvName = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_API_KEY_ENV"
+        if (-not $script:ApiKeyEnvName) { $script:ApiKeyEnvName = "OPENAI_API_KEY" }
+        Write-Hint ""
+        Write-Hint "api_key_env - ИМЯ переменной окружения, в которой лежит ключ (не сам ключ)."
+        Write-Hint "kbshff читает секрет из env с этим именем. Пример формата: OPENAI_API_KEY"
+        $script:ApiKeyEnvName = Read-Default "API key env var name" $script:ApiKeyEnvName
+    }
+    $apiKey = Get-EnvOrMap $EnvMap $script:ApiKeyEnvName
+    if (-not $apiKey) {
+        $apiKey = [Environment]::GetEnvironmentVariable($script:ApiKeyEnvName, "Process")
+    }
+    if (-not $apiKey) {
+        Write-Hint ""
+        Write-Hint "Значение ключа для $($script:ApiKeyEnvName): ввод скрыт, в историю команд и argv не попадает."
+        $apiKey = Read-Secret "Value for $($script:ApiKeyEnvName)"
+    }
+    if ([string]::IsNullOrWhiteSpace($apiKey)) {
+        throw "API key for $($script:ApiKeyEnvName) is required (set env, .env, or enter it interactively)"
+    }
+    [Environment]::SetEnvironmentVariable($script:ApiKeyEnvName, $apiKey, "Process")
+    return $apiKey
 }
 
 # --- main ---
@@ -553,33 +776,7 @@ New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
 $envPath = Join-Path $RepoRoot ".env"
 $envMap = Read-DotEnv $envPath
 
-Write-Step "AI provider (CLI applies these; the key stays in .env)"
-if (-not $BaseUrl) {
-    $BaseUrl = Get-EnvOrMap $envMap "KBSHFF_PROVIDER_BASE_URL"
-    if (-not $BaseUrl) { $BaseUrl = "https://api.openai.com/v1" }
-    $BaseUrl = Read-Default "Provider base_url" $BaseUrl
-}
-if (-not $Model) {
-    $Model = Get-EnvOrMap $envMap "KBSHFF_PROVIDER_MODEL"
-    if (-not $Model) { $Model = "gpt-4o" }
-    $Model = Read-Default "Model" $Model
-}
-if (-not $ApiKeyEnvName) {
-    $ApiKeyEnvName = Get-EnvOrMap $envMap "KBSHFF_PROVIDER_API_KEY_ENV"
-    if (-not $ApiKeyEnvName) { $ApiKeyEnvName = "OPENAI_API_KEY" }
-    $ApiKeyEnvName = Read-Default "API key env var name" $ApiKeyEnvName
-}
-$apiKey = Get-EnvOrMap $envMap $ApiKeyEnvName
-if (-not $apiKey) {
-    $apiKey = [Environment]::GetEnvironmentVariable($ApiKeyEnvName, "Process")
-}
-if (-not $apiKey) {
-    $apiKey = Read-Secret "Value for $ApiKeyEnvName (not echoed, not passed to CLI argv)"
-}
-if ([string]::IsNullOrWhiteSpace($apiKey)) {
-    throw "API key for $ApiKeyEnvName is required (set env, .env, or enter it interactively)"
-}
-[Environment]::SetEnvironmentVariable($ApiKeyEnvName, $apiKey, "Process")
+$apiKey = Read-ProviderSettings $envMap
 
 $kbshff = Ensure-Kbshff $envMap
 $indexer = Ensure-BslIndexer $envMap
@@ -619,7 +816,7 @@ Invoke-NativeProcess -FilePath $oscript -ArgumentList @("-encoding=utf-8", (Join
 Write-Host ""
 Write-Host "Install OK. Conveyor is ready."
 Write-Host "Profiles with skills: 1c-analyst, 1c-yaxunit, 1c-coder, 1c-implementer"
-Write-Host "Live eval:  .\harness\run.ps1"
+Write-Host "Live eval:  .\harness\run.cmd"
 Write-Host "Howto:      docs\howto-pipeline.md"
 Write-Host "CLI help:   kbshff help config"
 exit 0

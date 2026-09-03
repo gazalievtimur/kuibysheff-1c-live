@@ -45,15 +45,20 @@ if [[ -z "$TOOLS_DIR" ]]; then
 fi
 
 step() { echo "==> $*"; }
+hint() {
+  if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
+    echo "$*"
+  fi
+}
 have() { command -v "$1" >/dev/null 2>&1; }
 
 require_host() {
-  local name="$1" hint="$2"
+  local name="$1" hint_msg="$2"
   if have "$name"; then
     echo "OK  $name"
     return
   fi
-  echo "$name not found in PATH. $hint" >&2
+  echo "$name not found in PATH. $hint_msg" >&2
   exit 1
 }
 
@@ -196,17 +201,79 @@ raise SystemExit(f"No GitHub asset matching {match!r} in {repo}")
 PY
 }
 
+download_file() {
+  local url="$1" out="$2" label="${3:-download}"
+  echo "Downloading $url"
+  curl -fL --progress-bar -A "kuibysheff-1c-live-install" -o "$out" "$url"
+}
+
 find_under() {
   local root="$1" name="$2"
   find "$root" -type f -name "$name" 2>/dev/null | head -n 1
 }
 
+kbshff_release_glob() {
+  local u m
+  u="$(uname -s)"
+  m="$(uname -m)"
+  case "$u-$m" in
+    Linux-x86_64|Linux-amd64)
+      echo "agent_Kuibysheff-*-x86_64-unknown-linux-gnu.zip"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+install_kbshff_from_release() {
+  local glob url zip extract found stable sha_url sha_file expected actual
+  glob="$(kbshff_release_glob)"
+  if [[ -z "$glob" ]]; then
+    echo "No prebuilt kbshff for $(uname -s)/$(uname -m). See https://github.com/gazalievtimur/Agent-Kuibysheff/blob/main/docs/INSTALL.md" >&2
+    return 1
+  fi
+  stable="$TOOLS_DIR/kbshff"
+  url="$(github_asset_url gazalievtimur/Agent-Kuibysheff "$glob")"
+  zip="$(mktemp)"
+  extract="$(mktemp -d)"
+  download_file "$url" "$zip" "kbshff release"
+  if sha_url="$(github_asset_url gazalievtimur/Agent-Kuibysheff "${glob}.sha256" 2>/dev/null)"; then
+    sha_file="$(mktemp)"
+    download_file "$sha_url" "$sha_file" "kbshff checksum"
+    expected="$(awk '{print tolower($1)}' "$sha_file")"
+    actual="$(sha256sum "$zip" | awk '{print tolower($1)}')"
+    if [[ -n "$expected" && "$expected" != "$actual" ]]; then
+      echo "kbshff zip SHA256 mismatch (expected $expected, got $actual)" >&2
+      rm -rf "$zip" "$extract" "$sha_file"
+      return 1
+    fi
+    echo "OK  kbshff SHA256"
+    rm -f "$sha_file"
+  else
+    echo "No .sha256 asset for kbshff release; skipping checksum" >&2
+  fi
+  unzip -qo "$zip" -d "$extract"
+  found="$(find_under "$extract" kbshff)"
+  [[ -n "$found" ]] || { echo "kbshff not found in release archive" >&2; rm -rf "$zip" "$extract"; return 1; }
+  mkdir -p "$TOOLS_DIR"
+  cp "$found" "$stable"
+  chmod +x "$stable"
+  rm -rf "$zip" "$extract"
+  echo "Installed kbshff -> $stable"
+  printf '%s' "$stable"
+}
+
 ensure_kbshff() {
   step "kbshff"
-  local explicit src parent found release
+  local explicit src parent found release downloaded
   explicit="$(env_or_file KBSHFF_BIN "$ENV_FILE")"
   if [[ -n "$explicit" && -f "$explicit" ]]; then
     printf '%s' "$(cd "$(dirname "$explicit")" && pwd)/$(basename "$explicit")"
+    return
+  fi
+  if [[ -f "$TOOLS_DIR/kbshff" ]]; then
+    printf '%s' "$(cd "$TOOLS_DIR" && pwd)/kbshff"
     return
   fi
   if have kbshff; then
@@ -219,8 +286,18 @@ ensure_kbshff() {
   for c in "$src" "$parent/Agent-Kuibysheff" "$parent/Agent Kuibyshev"; do
     [[ -n "$c" && -f "$c/Cargo.toml" ]] || continue
     found="$(cd "$c" && pwd)"
+    release="$found/target/release/kbshff"
+    if [[ -f "$release" ]]; then
+      printf '%s' "$release"
+      return
+    fi
     break
   done
+  if downloaded="$(install_kbshff_from_release)"; then
+    printf '%s' "$downloaded"
+    return
+  fi
+  echo "GitHub release download failed; trying cargo build..." >&2
   if [[ -z "$found" ]]; then
     have git || { echo "kbshff not found and git is missing." >&2; exit 1; }
     have cargo || { echo "kbshff not found. Install cargo or set KBSHFF_BIN. https://github.com/gazalievtimur/Agent-Kuibysheff" >&2; exit 1; }
@@ -276,8 +353,7 @@ ensure_indexer() {
   mkdir -p "$dest"
   url="$(github_asset_url Regsorm/code-index-mcp "$(indexer_asset_glob)")"
   archive="$(mktemp)"
-  echo "Downloading $url"
-  curl -fsSL -A "kuibysheff-1c-live-install" -o "$archive" "$url"
+  download_file "$url" "$archive" "bsl-indexer"
   tar -xzf "$archive" -C "$dest"
   rm -f "$archive"
   found="$(find_under "$dest" bsl-indexer)"
@@ -309,8 +385,7 @@ ensure_jar() {
     return
   fi
   url="$(github_asset_url 1c-syntax/bsl-language-server '*-exec.jar')"
-  echo "Downloading $url"
-  curl -fsSL -A "kuibysheff-1c-live-install" -o "$stable" "$url"
+  download_file "$url" "$stable" "bsl-language-server JAR"
   printf '%s' "$stable"
 }
 
@@ -338,9 +413,65 @@ ensure_mcp_js() {
   printf '%s' "$chosen"
 }
 
+find_1c_platform_bins() {
+  local root ver bin
+  for root in /opt/1cv8/x86_64 /opt/1cv8 /usr/lib/1cv8; do
+    [[ -d "$root" ]] || continue
+    for ver in "$root"/8.3.*; do
+      [[ -d "$ver" ]] || continue
+      bin="$ver/bin"
+      if [[ -d "$bin" ]] && { [[ -x "$bin/1cv8" ]] || [[ -x "$bin/ibcmd" ]]; }; then
+        printf '%s\n' "$bin"
+      fi
+    done
+  done | sort -r
+}
+
+select_platform_bin_for_ingest() {
+  local bins=() i choice manual skip
+  if [[ -n "$PLATFORM_PATH" ]]; then
+    printf '%s' "$PLATFORM_PATH"
+    return
+  fi
+  if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+    printf ''
+    return
+  fi
+  hint ""
+  hint "Ingest строит индекс справки платформы для MCP sntx_sem (поиск на live-прогоне)."
+  hint "Нужен каталог bin лицензионной платформы 1С (обычно .../8.3.xx/bin)."
+  hint "HBK в репозиторий не копируется."
+  mapfile -t bins < <(find_1c_platform_bins)
+  if [[ "${#bins[@]}" -eq 0 ]]; then
+    hint "Установленные 8.3.*/bin не найдены автоматически."
+    read -r -p "Run sntx_sem ingest? Enter path to platform bin, or leave empty to skip: " choice || true
+    printf '%s' "$choice"
+    return
+  fi
+  echo "Найдены каталоги bin платформы:"
+  for i in "${!bins[@]}"; do
+    echo "  [$((i + 1))] ${bins[$i]}"
+  done
+  manual=$((${#bins[@]} + 1))
+  skip=$((${#bins[@]} + 2))
+  echo "  [$manual] ввести путь вручную"
+  echo "  [$skip] пропустить ingest"
+  read -r -p "Выбор [1]: " choice || true
+  [[ -z "$choice" ]] && choice=1
+  if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 && "$choice" -le "${#bins[@]}" ]]; then
+    printf '%s' "${bins[$((choice - 1))]}"
+    return
+  fi
+  if [[ "$choice" == "$manual" ]]; then
+    read_default "Path to 1C platform bin" ""
+    return
+  fi
+  printf ''
+}
+
 ensure_sntx() {
   step "1c-sntx-sem"
-  local existing src parent venv_py config answer
+  local existing src parent venv_py config chosen
   existing="$(env_or_file SNTX_SEM_CONFIG "$ENV_FILE")"
   src=""
   if [[ -n "$existing" && -f "$existing" ]]; then
@@ -374,18 +505,15 @@ ensure_sntx() {
   fi
   local do_ingest=1
   [[ "$SKIP_INGEST" -eq 1 ]] && do_ingest=0
-  if [[ "$do_ingest" -eq 1 && "$NON_INTERACTIVE" -eq 0 ]]; then
-    read -r -p "Run sntx_sem ingest from a 1C platform bin folder? [y/N] " answer || true
-    [[ "$answer" =~ ^[Yy] ]] || do_ingest=0
-  fi
   if [[ "$do_ingest" -eq 1 ]]; then
-    if [[ -z "$PLATFORM_PATH" && "$NON_INTERACTIVE" -eq 0 ]]; then
-      PLATFORM_PATH="$(read_default "Path to 1C platform bin" "")"
+    chosen="$PLATFORM_PATH"
+    if [[ -z "$chosen" ]]; then
+      chosen="$(select_platform_bin_for_ingest)"
     fi
-    if [[ -z "$PLATFORM_PATH" ]]; then
+    if [[ -z "$chosen" ]]; then
       echo "Skipping ingest: no platform path." >&2
     else
-      (cd "$src" && "$venv_py" -m sntx_sem ingest --platform-path "$PLATFORM_PATH")
+      (cd "$src" && "$venv_py" -m sntx_sem ingest --platform-path "$chosen")
     fi
   else
     echo "Skipping ingest. Run ingest before a live eval if the index is empty." >&2
@@ -394,22 +522,30 @@ ensure_sntx() {
 }
 
 resolve_java_home() {
-  local existing
+  local existing detected
   existing="$(env_or_file JAVA_HOME "$ENV_FILE")"
   if [[ -n "$existing" && -d "$existing" ]]; then
     printf '%s' "$existing"
     return
   fi
   have java || { echo "java not found. Install JDK 17+: https://adoptium.net/" >&2; exit 1; }
-  java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java.home/ {print $2; exit}'
+  detected="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java.home/ {print $2; exit}')"
+  if [[ "$NON_INTERACTIVE" -eq 1 || -z "$detected" ]]; then
+    printf '%s' "$detected"
+    return
+  fi
+  hint ""
+  hint "JAVA_HOME нужен MCP bsl-language-server (анализ BSL)."
+  hint "Обнаружен Java home: $detected"
+  read_default "JAVA_HOME" "$detected"
 }
 
 apply_provider() {
-  local kbshff="$1" project="$2" agent="$3" base="$4" model="$5" keyenv="$6"
-  shift 6
+  local kbshff="$1" project="$2" agent="$3" base="$4" model="$5" keyenv="$6" label="$7"
+  shift 7
   local expected_skills=("$@")
   local staging settings name listed skill
-  step "kbshff CLI: init / import skills / provider set / check ($agent)"
+  step "$label kbshff CLI: init / import skills / provider set / check ($agent)"
   mkdir -p "$project"
   "$kbshff" init "$agent" --project-root "$project" --force
   staging="$project/.kuibysheff/.1c-live-import/$agent"
@@ -440,13 +576,13 @@ apply_provider() {
 install_conveyor_profiles() {
   local kbshff="$1" project="$2" base="$3" model="$4" keyenv="$5"
   step "Conveyor profiles (all skills)"
-  apply_provider "$kbshff" "$project" "1c-analyst" "$base" "$model" "$keyenv" \
+  apply_provider "$kbshff" "$project" "1c-analyst" "$base" "$model" "$keyenv" "[1/4]" \
     workspace platform_help conf_docs code_index local_research web_search
-  apply_provider "$kbshff" "$project" "1c-yaxunit" "$base" "$model" "$keyenv" \
+  apply_provider "$kbshff" "$project" "1c-yaxunit" "$base" "$model" "$keyenv" "[2/4]" \
     workspace yaxunit_docs platform_help code_index bsl_lint local_research web_search
-  apply_provider "$kbshff" "$project" "1c-coder" "$base" "$model" "$keyenv" \
+  apply_provider "$kbshff" "$project" "1c-coder" "$base" "$model" "$keyenv" "[3/4]" \
     workspace platform_help code_index bsl_lint local_research
-  apply_provider "$kbshff" "$project" "1c-implementer" "$base" "$model" "$keyenv" \
+  apply_provider "$kbshff" "$project" "1c-implementer" "$base" "$model" "$keyenv" "[4/4]" \
     workspace platform_help code_index local_research bsl_lint
 }
 
@@ -460,26 +596,46 @@ require_host node "https://nodejs.org/"
 require_host java "JDK 17+: https://adoptium.net/"
 require_host python3 "Python 3 is required for 1c-sntx-sem"
 require_host curl "curl is required to download GitHub releases"
+have unzip || { echo "unzip not found (needed to extract kbshff release)" >&2; exit 1; }
+echo "OK  unzip"
 
-step "AI provider (CLI will apply these; key stays in .env)"
+step "AI provider"
+if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
+  echo ""
+  echo "Нужен любой OpenAI-compatible HTTP API (Chat Completions)."
+  echo "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
+  echo "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
+  echo "Значения по умолчанию — плейсхолдеры формата, не рекомендация конкретного вендора."
+  echo ""
+fi
 if [[ -z "$BASE_URL" ]]; then
   BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
   [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
+  hint "base_url — URL эндпоинта до /v1, куда kbshff шлёт запросы к модели."
+  hint "Пример формата: https://api.example.com/v1"
   BASE_URL="$(read_default "Provider base_url" "$BASE_URL")"
 fi
 if [[ -z "$MODEL" ]]; then
   MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
   [[ -n "$MODEL" ]] || MODEL="gpt-4o"
+  hint ""
+  hint "model — идентификатор модели у вашего провайдера (как в его API / кабинете)."
+  hint "Пример формата: gpt-4o"
   MODEL="$(read_default "Model" "$MODEL")"
 fi
 if [[ -z "$API_KEY_ENV_NAME" ]]; then
   API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
   [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="OPENAI_API_KEY"
+  hint ""
+  hint "api_key_env — ИМЯ переменной окружения, в которой лежит ключ (не сам ключ)."
+  hint "kbshff читает секрет из env с этим именем. Пример формата: OPENAI_API_KEY"
   API_KEY_ENV_NAME="$(read_default "API key env var name" "$API_KEY_ENV_NAME")"
 fi
 API_KEY="$(env_or_file "$API_KEY_ENV_NAME" "$ENV_FILE")"
 if [[ -z "$API_KEY" ]]; then
-  API_KEY="$(read_secret "Value for ${API_KEY_ENV_NAME} (not echoed, not passed to CLI argv)")"
+  hint ""
+  hint "Значение ключа для ${API_KEY_ENV_NAME}: ввод скрыт, в историю команд и argv не попадает."
+  API_KEY="$(read_secret "Value for ${API_KEY_ENV_NAME}")"
 fi
 if [[ -z "$API_KEY" ]]; then
   echo "API key for $API_KEY_ENV_NAME is required" >&2

@@ -8,10 +8,12 @@
 
 ## 1. Установка
 
-Нужны в `PATH`: [OneScript 2.0](https://oscript.io/), Git, Node.js, Java 17+, Python 3. `cargo` — только если нет готового `kbshff`.
+Нужны в `PATH`: [OneScript 2.0](https://oscript.io/), Git, Node.js, Java 17+, Python 3 (`unzip` на Linux). `kbshff` install скачает из GitHub Releases в `tools/` (Windows/Linux x86_64); `cargo` — только fallback.
 
 ```powershell
-.\scripts\install.ps1
+.\scripts\install.cmd
+# если ExecutionPolicy=Restricted: не меняйте политику машины, запускайте .cmd
+# или: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 # флаги: -SkipIngest -NonInteractive -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin"
 ```
 
@@ -23,13 +25,13 @@ chmod +x scripts/install.sh
 
 Скрипт:
 
-1. Спрашивает `base_url`, `model`, имя переменной ключа и **значение ключа** (не в argv).
-2. Ставит MCP-инструменты в `tools/` (или переиспользует уже заданные пути / соседние clone).
+1. Спрашивает `base_url`, `model`, имя переменной ключа и **значение ключа** (с пояснениями; ключ не в argv).
+2. Ставит MCP-инструменты и при необходимости `kbshff` в `tools/` (progress bar на загрузках) или переиспользует уже заданные пути / соседние clone.
 3. Пишет `.env` (секреты и абсолютные пути).
-4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`): `init`, `config import` (`master_prompt.md` + **`skills.dsl`** + `rules.md`), `provider set`, проверка `skill list` и `check`. Профили пишутся в `.kuibysheff/` корня репозитория.
-5. Гоняет `oscript … harness/run.os --dry-run`. После этого конвейер готов: `.\harness\run.ps1` / `./harness/run.sh`.
+4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`), `[n/4]`: `init`, `config import` (`master_prompt.md` + **`skills.dsl`** + `rules.md`), `provider set`, проверка `skill list` и `check`. Профили пишутся в `.kuibysheff/` корня репозитория.
+5. Гоняет `oscript … harness/run.os --dry-run`. После этого конвейер готов: `.\harness\run.cmd` / `./harness/run.sh`.
 
-Ingest справки `1c-sntx-sem` опционален и требует путь к `bin` вашей лицензионной платформы 1С. Без индекса семантический поиск `sntx_sem` на live-прогоне не работает. HBK в репозиторий не кладётся.
+Ingest справки `1c-sntx-sem` опционален: install предложит найденные `8.3.*\bin` (или путь вручную / пропуск). Без индекса семантический поиск `sntx_sem` на live-прогоне не работает. HBK в репозиторий не кладётся.
 
 ## 2. Конфиг агента через CLI (предпочтительный путь)
 
