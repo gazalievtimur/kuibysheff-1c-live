@@ -46,7 +46,25 @@ function Write-Hint([string]$Message) {
     if ($NonInteractive) {
         return
     }
-    Write-Host $Message
+    if ([string]::IsNullOrEmpty($Message)) {
+        Write-Host ""
+        return
+    }
+    Write-Host $Message -ForegroundColor DarkGray
+}
+
+function Write-InputLabel([string]$Prompt) {
+    Write-Host "[ВВОД] " -NoNewline -ForegroundColor Black -BackgroundColor Cyan
+    Write-Host $Prompt -NoNewline -ForegroundColor Cyan
+    Write-Host ": " -NoNewline -ForegroundColor Cyan
+}
+
+function Read-Prompt([string]$Prompt) {
+    if ($NonInteractive) {
+        return ""
+    }
+    Write-InputLabel $Prompt
+    return Read-Host
 }
 
 function Test-Command([string]$Name) {
@@ -154,18 +172,41 @@ function Read-Default([string]$Prompt, [string]$Default) {
         return $Default
     }
     $suffix = if ([string]::IsNullOrWhiteSpace($Default)) { "" } else { " [$Default]" }
-    $value = Read-Host "$Prompt$suffix"
+    Write-InputLabel "$Prompt$suffix"
+    $value = Read-Host
     if ([string]::IsNullOrWhiteSpace($value)) {
         return $Default
     }
     return $value
 }
 
+function Test-ValidEnvVarName([string]$Name) {
+    return $Name -match '^[A-Za-z_][A-Za-z0-9_]*$'
+}
+
+function Test-LooksLikeApiKey([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+    if ($Value -match '(?i)^sk[-_]') {
+        return $true
+    }
+    # Long token that is not a legal env var name (hyphens, etc.)
+    if ($Value.Length -ge 20 -and -not (Test-ValidEnvVarName $Value)) {
+        return $true
+    }
+    return $false
+}
+
 function Read-Secret([string]$Prompt) {
     if ($NonInteractive) {
         return ""
     }
-    $sec = Read-Host $Prompt -AsSecureString
+    Write-InputLabel $Prompt
+    $sec = Read-Host -AsSecureString
+    if ($null -eq $sec -or $sec.Length -eq 0) {
+        return ""
+    }
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
     try {
         return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
@@ -216,7 +257,7 @@ function Confirm-OptionalHostGaps([string[]]$Gaps) {
         Write-Warning "NonInteractive: продолжаем без рекомендуемых инструментов."
         return
     }
-    $ans = Read-Host "Продолжить установку без них? [y/N]"
+    $ans = Read-Prompt "Подтверждение: продолжить без рекомендуемых инструментов? [y/N]"
     if ($ans -notmatch '^(?i)(y|yes|д|да)$') {
         throw "Install cancelled. Install missing tools (see docs/prerequisites.md) and re-run."
     }
@@ -341,7 +382,7 @@ function Ensure-Oscript {
     Write-Host "Установим OneScript через OVM: https://github.com/oscript-library/ovm"
     Write-Host "Версия: $OscriptVersion (нужен .NET Framework 4.8+ для ovm.exe на Windows)."
     if (-not $NonInteractive) {
-        $ans = Read-Host "Установить OneScript ($OscriptVersion) через ovm? [Y/n]"
+        $ans = Read-Prompt "Подтверждение: установить OneScript ($OscriptVersion) через ovm? [Y/n]"
         if ($ans -match '^(?i)(n|no|н|нет)$') {
             throw "oscript required. Install via OVM (docs/prerequisites.md) or re-run and accept install."
         }
@@ -665,7 +706,7 @@ function Select-PlatformBinForIngest {
     $found = @(Find-1cPlatformBins)
     if ($found.Count -eq 0) {
         Write-Hint "Установленные 8.3.*\bin не найдены автоматически."
-        $answer = Read-Host "Run sntx_sem ingest? Enter path to platform bin, or leave empty to skip"
+        $answer = Read-Default "Путь к bin платформы 1С (пусто = пропуск)" ""
         return $answer
     }
     Write-Host "Найдены каталоги bin платформы:"
@@ -676,10 +717,7 @@ function Select-PlatformBinForIngest {
     $skipIdx = $found.Count + 2
     Write-Host ("  [{0}] ввести путь вручную" -f $manualIdx)
     Write-Host ("  [{0}] пропустить ingest" -f $skipIdx)
-    $choice = Read-Host "Выбор [1]"
-    if ([string]::IsNullOrWhiteSpace($choice)) {
-        $choice = "1"
-    }
+    $choice = Read-Default "Номер выбора" "1"
     $n = 0
     if (-not [int]::TryParse($choice, [ref]$n)) {
         Write-Warning "Неверный выбор - ingest пропущен"
@@ -689,7 +727,7 @@ function Select-PlatformBinForIngest {
         return $found[$n - 1]
     }
     if ($n -eq $manualIdx) {
-        return Read-Default "Path to 1C platform bin" ""
+        return Read-Default "Путь к bin платформы 1С (пусто = пропуск)" ""
     }
     return ""
 }
@@ -786,7 +824,7 @@ function Resolve-JavaHome([hashtable]$EnvMap) {
     Write-Hint ""
     Write-Hint "JAVA_HOME нужен штатному MCP bsl-language-server (анализ BSL). Можно оставить пустым, если свой MCP без Java."
     Write-Hint "Обнаружен Java home: $detected"
-    return Read-Default "JAVA_HOME" $detected
+    return Read-Default "Путь JAVA_HOME" $detected
 }
 
 function Get-ConveyorAgents {
@@ -863,24 +901,48 @@ function Read-ProviderSettings([hashtable]$EnvMap) {
         if (-not $script:BaseUrl) { $script:BaseUrl = "https://api.openai.com/v1" }
         Write-Hint "base_url - общий URL эндпоинта до /v1 для всех агентов."
         Write-Hint "Пример формата: https://api.example.com/v1"
-        $script:BaseUrl = Read-Default "Provider base_url" $script:BaseUrl
+        $script:BaseUrl = Read-Default "URL эндпоинта (base_url)" $script:BaseUrl
     }
+    $pastedApiKey = ""
     if (-not $script:ApiKeyEnvName) {
         $script:ApiKeyEnvName = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_API_KEY_ENV"
         if (-not $script:ApiKeyEnvName) { $script:ApiKeyEnvName = "OPENAI_API_KEY" }
         Write-Hint ""
-        Write-Hint "api_key_env - ИМЯ переменной окружения, в которой лежит ключ (не сам ключ)."
-        Write-Hint "kbshff читает секрет из env с этим именем. Пример формата: OPENAI_API_KEY"
-        $script:ApiKeyEnvName = Read-Default "API key env var name" $script:ApiKeyEnvName
+        Write-Hint "Имя переменной окружения для API-ключа (не сам ключ)."
+        Write-Hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
+        Write-Hint "kbshff читает секрет из env с этим именем."
+        $rawEnvName = Read-Default "Имя переменной для API-ключа" $script:ApiKeyEnvName
+        if (Test-LooksLikeApiKey $rawEnvName) {
+            Write-Warning "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY."
+            $pastedApiKey = $rawEnvName
+            $script:ApiKeyEnvName = "OPENAI_API_KEY"
+            $script:ApiKeyEnvName = Read-Default "Имя переменной для API-ключа" $script:ApiKeyEnvName
+        }
+        else {
+            $script:ApiKeyEnvName = $rawEnvName
+        }
+        if (-not (Test-ValidEnvVarName $script:ApiKeyEnvName)) {
+            throw "Invalid API key env var name '$($script:ApiKeyEnvName)'. Use something like OPENAI_API_KEY (letters, digits, underscore)."
+        }
     }
-    $apiKey = Get-EnvOrMap $EnvMap $script:ApiKeyEnvName
+    $apiKey = $pastedApiKey
+    if (-not $apiKey) {
+        $apiKey = Get-EnvOrMap $EnvMap $script:ApiKeyEnvName
+    }
     if (-not $apiKey) {
         $apiKey = [Environment]::GetEnvironmentVariable($script:ApiKeyEnvName, "Process")
     }
     if (-not $apiKey) {
         Write-Hint ""
-        Write-Hint "Значение ключа для $($script:ApiKeyEnvName): ввод скрыт, в историю команд и argv не попадает."
-        $apiKey = Read-Secret "Value for $($script:ApiKeyEnvName)"
+        Write-Hint "Значение ключа для переменной $($script:ApiKeyEnvName)."
+        Write-Hint "Ввод скрыт (символы не видны). Вставьте ключ и нажмите Enter."
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $apiKey = Read-Secret "Значение API-ключа ($($script:ApiKeyEnvName))"
+            if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
+                break
+            }
+            Write-Warning "Пустой ввод (попытка $attempt/3). Вставьте ключ ещё раз - символы не отображаются."
+        }
     }
     if ([string]::IsNullOrWhiteSpace($apiKey)) {
         throw "API key for $($script:ApiKeyEnvName) is required (set env, .env, or enter it interactively)"
@@ -915,7 +977,7 @@ function Read-ProviderSettings([hashtable]$EnvMap) {
         if (-not $chosen) {
             $chosen = $defaultModel
         }
-        $chosen = Read-Default "Model for $($agent.Id)" $chosen
+        $chosen = Read-Default "Модель для $($agent.Id)" $chosen
         if ([string]::IsNullOrWhiteSpace($chosen)) {
             throw "model for $($agent.Id) is required"
         }
