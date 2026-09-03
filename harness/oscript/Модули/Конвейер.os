@@ -123,7 +123,7 @@
 		Возврат 1;
 	КонецЕсли;
 	БазовыйТекст = Окружение.ПрочитатьТекст(ПутьКонфига);
-	ApiKeyEnv = КонвейерКонфиг.Провайдер(БазовыйТекст).ApiKeyEnv;
+	ApiKeyEnv = КонвейерКонфиг.Провайдер(БазовыйТекст, "").ApiKeyEnv;
 	Если Не ЗначениеЗаполнено(Окружение.ПеременнаяСреды(ApiKeyEnv)) Тогда
 		Сообщить("missing provider API key env: " + ApiKeyEnv);
 		Возврат 1;
@@ -463,7 +463,7 @@
 КонецПроцедуры
 
 Процедура ПрименитьПровайдераCli(AgentBin, ProjectRoot, AgentId, БазовыйТекст)
-	Пров = КонвейерКонфиг.Провайдер(БазовыйТекст);
+	Пров = КонвейерКонфиг.Провайдер(БазовыйТекст, AgentId);
 	Аргументы = Новый Массив;
 	Аргументы.Добавить("config");
 	Аргументы.Добавить("--project-root");
@@ -645,14 +645,11 @@
 			КонецЕсли;
 		КонецЕсли;
 	КонецЕсли;
-	Если Не Окружение.ФайлСуществует(Node) Тогда
-		ВызватьИсключение "Node.js required for bsl-language-server MCP (set BSL_LS_NODE or put node on PATH).";
-	КонецЕсли;
-	Если Не Окружение.ФайлСуществует(ServerJs) Тогда
-		ВызватьИсключение "BSL_LS_MCP / BSL_LS_SERVER is required (path to bsl-ls-mcp/server.js, as in the ЗУП project).";
-	КонецЕсли;
-	Если Не Окружение.ФайлСуществует(Jar) Тогда
-		ВызватьИсключение "BSL_LS_JAR is required (path to bsl-language-server exec jar).";
+	Если Не Окружение.ФайлСуществует(Node) Или Не Окружение.ФайлСуществует(ServerJs) Или Не Окружение.ФайлСуществует(Jar) Тогда
+		// Штатный MCP bsl-ls = Node-мост + JAR (+ Java). Без них блок не подключаем:
+		// пользователь может принести свой MCP без Node/Java.
+		Сообщить("bsl-language-server MCP skipped (need node + BSL_LS_MCP + BSL_LS_JAR). Optional; see docs/prerequisites.md");
+		Возврат Неопределено;
 	КонецЕсли;
 	Результат = Новый Структура;
 	Результат.Вставить("Node", Node);

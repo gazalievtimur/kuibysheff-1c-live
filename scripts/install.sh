@@ -8,6 +8,10 @@ SKIP_INGEST=0
 NON_INTERACTIVE=0
 BASE_URL=""
 MODEL=""
+MODEL_ANALYST=""
+MODEL_YAXUNIT=""
+MODEL_CODER=""
+MODEL_IMPLEMENTER=""
 API_KEY_ENV_NAME=""
 PLATFORM_PATH=""
 
@@ -15,6 +19,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/install.sh [--repo-root DIR] [--tools-dir DIR] [--skip-ingest]
                           [--non-interactive] [--base-url URL] [--model NAME]
+                          [--model-analyst NAME] [--model-yaxunit NAME]
+                          [--model-coder NAME] [--model-implementer NAME]
                           [--api-key-env NAME] [--platform-path DIR]
 EOF
 }
@@ -27,6 +33,10 @@ while [[ $# -gt 0 ]]; do
     --non-interactive) NON_INTERACTIVE=1; shift ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
+    --model-analyst) MODEL_ANALYST="$2"; shift 2 ;;
+    --model-yaxunit) MODEL_YAXUNIT="$2"; shift 2 ;;
+    --model-coder) MODEL_CODER="$2"; shift 2 ;;
+    --model-implementer) MODEL_IMPLEMENTER="$2"; shift 2 ;;
     --api-key-env) API_KEY_ENV_NAME="$2"; shift 2 ;;
     --platform-path) PLATFORM_PATH="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -60,6 +70,40 @@ require_host() {
   fi
   echo "$name not found in PATH. $hint_msg" >&2
   exit 1
+}
+
+confirm_optional_host_gaps() {
+  if [[ "$#" -eq 0 ]]; then
+    return
+  fi
+  echo "" >&2
+  echo "============================================================" >&2
+  echo "ВНИМАНИЕ: рекомендуемые инструменты не найдены" >&2
+  echo "============================================================" >&2
+  local gap
+  for gap in "$@"; do
+    echo "  * $gap" >&2
+  done
+  echo "" >&2
+  echo "Рекомендуем установить их СЕЙЧАС (до продолжения install):" >&2
+  echo "  docs/prerequisites.md" >&2
+  echo "Без Node.js / Java 17+ штатный MCP bsl-language-server не настроится." >&2
+  echo "Без bin платформы 1С ingest справки sntx_sem будет недоступен (семантический поиск)." >&2
+  echo "Свой MCP без Node/Java можно подключить позже через CLI / .env." >&2
+  echo "" >&2
+  if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+    echo "NonInteractive: продолжаем без рекомендуемых инструментов." >&2
+    return
+  fi
+  local ans
+  read -r -p "Продолжить установку без них? [y/N]: " ans || true
+  case "$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')" in
+    y|yes|д|да) echo "Continuing without recommended tools..." ;;
+    *)
+      echo "Install cancelled. Install missing tools (see docs/prerequisites.md) and re-run." >&2
+      exit 1
+      ;;
+  esac
 }
 
 dotenv_get() {
@@ -109,6 +153,10 @@ if os.path.isfile(path):
 preferred = [
     "KBSHFF_PROVIDER_BASE_URL",
     "KBSHFF_PROVIDER_MODEL",
+    "KBSHFF_PROVIDER_MODEL_1C_ANALYST",
+    "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT",
+    "KBSHFF_PROVIDER_MODEL_1C_CODER",
+    "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER",
     "KBSHFF_PROVIDER_API_KEY_ENV",
     "OPENAI_API_KEY",
     "POLZA_API_KEY",
@@ -365,7 +413,7 @@ ensure_indexer() {
 }
 
 ensure_jar() {
-  step "bsl-language-server JAR"
+  step "bsl-language-server JAR (optional)"
   local existing stable home_jar url
   existing="$(env_or_file BSL_LS_JAR "$ENV_FILE")"
   if [[ -n "$existing" && -f "$existing" ]]; then
@@ -384,33 +432,50 @@ ensure_jar() {
     printf '%s' "$stable"
     return
   fi
-  url="$(github_asset_url 1c-syntax/bsl-language-server '*-exec.jar')"
-  download_file "$url" "$stable" "bsl-language-server JAR"
+  if ! url="$(github_asset_url 1c-syntax/bsl-language-server '*-exec.jar' 2>/dev/null)"; then
+    echo "Skipping BSL LS JAR download. docs/prerequisites.md" >&2
+    printf ''
+    return
+  fi
+  if ! download_file "$url" "$stable" "bsl-language-server JAR"; then
+    echo "Skipping BSL LS JAR. docs/prerequisites.md" >&2
+    printf ''
+    return
+  fi
   printf '%s' "$stable"
 }
 
 ensure_mcp_js() {
-  step "bsl-ls-mcp"
-  local existing home_js vendor_js chosen
+  step "bsl-ls-mcp (optional; needs Node.js)"
+  local existing home_js vendor_js
   existing="$(env_or_file BSL_LS_MCP "$ENV_FILE")"
   [[ -n "$existing" ]] || existing="$(env_or_file BSL_LS_SERVER "$ENV_FILE")"
   home_js="${HOME}/.claude/bsl-ls-mcp/server.js"
   vendor_js="$TOOLS_DIR/bsl-ls-mcp/server.js"
   if [[ -n "$existing" && -f "$existing" ]]; then
-    chosen="$(cd "$(dirname "$existing")" && pwd)/$(basename "$existing")"
-  elif [[ -f "$home_js" ]]; then
-    chosen="$home_js"
-  else
-    chosen="$vendor_js"
+    printf '%s' "$(cd "$(dirname "$existing")" && pwd)/$(basename "$existing")"
+    return
   fi
-  case "$chosen" in
-    "$vendor_js"|*"${TOOLS_DIR}/bsl-ls-mcp"*)
-      have npm || { echo "npm not found. Install Node.js: https://nodejs.org/" >&2; exit 1; }
-      (cd "$TOOLS_DIR/bsl-ls-mcp" && npm install --omit=dev)
-      chosen="$vendor_js"
-      ;;
-  esac
-  printf '%s' "$chosen"
+  if [[ -f "$home_js" ]]; then
+    printf '%s' "$home_js"
+    return
+  fi
+  if ! have npm; then
+    echo "Skipping tools/bsl-ls-mcp (Node.js/npm not found). docs/prerequisites.md" >&2
+    printf ''
+    return
+  fi
+  if [[ ! -f "$vendor_js" ]]; then
+    echo "Skipping bsl-ls-mcp: missing $vendor_js" >&2
+    printf ''
+    return
+  fi
+  if ! (cd "$TOOLS_DIR/bsl-ls-mcp" && npm install --omit=dev); then
+    echo "Skipping bsl-ls-mcp (npm install failed). docs/prerequisites.md" >&2
+    printf ''
+    return
+  fi
+  printf '%s' "$vendor_js"
 }
 
 find_1c_platform_bins() {
@@ -528,14 +593,18 @@ resolve_java_home() {
     printf '%s' "$existing"
     return
   fi
-  have java || { echo "java not found. Install JDK 17+: https://adoptium.net/" >&2; exit 1; }
+  if ! have java; then
+    echo "Java not found (optional). Default BSL language-server MCP needs JDK 17+. docs/prerequisites.md" >&2
+    printf ''
+    return
+  fi
   detected="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java.home/ {print $2; exit}')"
   if [[ "$NON_INTERACTIVE" -eq 1 || -z "$detected" ]]; then
     printf '%s' "$detected"
     return
   fi
   hint ""
-  hint "JAVA_HOME нужен MCP bsl-language-server (анализ BSL)."
+  hint "JAVA_HOME нужен штатному MCP bsl-language-server (анализ BSL). Можно оставить пустым, если свой MCP без Java."
   hint "Обнаружен Java home: $detected"
   read_default "JAVA_HOME" "$detected"
 }
@@ -574,35 +643,62 @@ apply_provider() {
 }
 
 install_conveyor_profiles() {
-  local kbshff="$1" project="$2" base="$3" model="$4" keyenv="$5"
+  local kbshff="$1" project="$2" base="$3" keyenv="$4"
   step "Conveyor profiles (all skills)"
-  apply_provider "$kbshff" "$project" "1c-analyst" "$base" "$model" "$keyenv" "[1/4]" \
+  apply_provider "$kbshff" "$project" "1c-analyst" "$base" "${AGENT_MODELS[1c-analyst]}" "$keyenv" "[1/4]" \
     workspace platform_help conf_docs code_index local_research web_search
-  apply_provider "$kbshff" "$project" "1c-yaxunit" "$base" "$model" "$keyenv" "[2/4]" \
+  apply_provider "$kbshff" "$project" "1c-yaxunit" "$base" "${AGENT_MODELS[1c-yaxunit]}" "$keyenv" "[2/4]" \
     workspace yaxunit_docs platform_help code_index bsl_lint local_research web_search
-  apply_provider "$kbshff" "$project" "1c-coder" "$base" "$model" "$keyenv" "[3/4]" \
+  apply_provider "$kbshff" "$project" "1c-coder" "$base" "${AGENT_MODELS[1c-coder]}" "$keyenv" "[3/4]" \
     workspace platform_help code_index bsl_lint local_research
-  apply_provider "$kbshff" "$project" "1c-implementer" "$base" "$model" "$keyenv" "[4/4]" \
+  apply_provider "$kbshff" "$project" "1c-implementer" "$base" "${AGENT_MODELS[1c-implementer]}" "$keyenv" "[4/4]" \
     workspace platform_help code_index local_research bsl_lint
+}
+
+agent_model_env_name() {
+  # 1c-analyst -> KBSHFF_PROVIDER_MODEL_1C_ANALYST
+  local id="$1"
+  local suffix
+  suffix="$(printf '%s' "$id" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
+  echo "KBSHFF_PROVIDER_MODEL_${suffix}"
 }
 
 ENV_FILE="$REPO_ROOT/.env"
 mkdir -p "$TOOLS_DIR"
 
 step "Host tools"
-require_host oscript "Install OneScript 2.0: https://oscript.io/"
-require_host git "https://git-scm.com/"
-require_host node "https://nodejs.org/"
-require_host java "JDK 17+: https://adoptium.net/"
-require_host python3 "Python 3 is required for 1c-sntx-sem"
+require_host oscript "Install OneScript 2.0: https://oscript.io/ — see docs/prerequisites.md"
+require_host git "https://git-scm.com/ — see docs/prerequisites.md"
+OPTIONAL_GAPS=()
+if have node; then
+  echo "OK  node (recommended for BSL LS MCP)"
+else
+  OPTIONAL_GAPS+=("Node.js (LTS) + npm — штатный tools/bsl-ls-mcp. https://nodejs.org/  (docs/prerequisites.md)")
+fi
+if have java; then
+  echo "OK  java (recommended for BSL LS JAR, JDK 17+)"
+else
+  OPTIONAL_GAPS+=("Java / JDK 17+ — запуск bsl-language-server JAR. https://adoptium.net/  (docs/prerequisites.md)")
+fi
+require_host python3 "Python 3 is required for 1c-sntx-sem. docs/prerequisites.md"
 require_host curl "curl is required to download GitHub releases"
-have unzip || { echo "unzip not found (needed to extract kbshff release)" >&2; exit 1; }
+have unzip || { echo "unzip not found (needed to extract kbshff release). docs/prerequisites.md" >&2; exit 1; }
 echo "OK  unzip"
+if [[ "$SKIP_INGEST" -eq 0 && -z "$PLATFORM_PATH" ]]; then
+  mapfile -t _platform_bins < <(find_1c_platform_bins)
+  if [[ "${#_platform_bins[@]}" -eq 0 ]]; then
+    OPTIONAL_GAPS+=("Платформа 1С (каталог bin 8.3.* с 1cv8/ibcmd) — для ingest sntx_sem. Либо --platform-path, либо --skip-ingest.")
+  else
+    echo "OK  1C platform bin (found ${#_platform_bins[@]})"
+  fi
+fi
+confirm_optional_host_gaps "${OPTIONAL_GAPS[@]}"
 
 step "AI provider"
 if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
   echo ""
   echo "Нужен любой OpenAI-compatible HTTP API (Chat Completions)."
+  echo "Эндпоинт (base_url) и ключ - общие; модель задаётся отдельно для каждого агента конвейера."
   echo "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
   echo "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
   echo "Значения по умолчанию — плейсхолдеры формата, не рекомендация конкретного вендора."
@@ -611,17 +707,9 @@ fi
 if [[ -z "$BASE_URL" ]]; then
   BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
   [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
-  hint "base_url — URL эндпоинта до /v1, куда kbshff шлёт запросы к модели."
+  hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
   hint "Пример формата: https://api.example.com/v1"
   BASE_URL="$(read_default "Provider base_url" "$BASE_URL")"
-fi
-if [[ -z "$MODEL" ]]; then
-  MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
-  [[ -n "$MODEL" ]] || MODEL="gpt-4o"
-  hint ""
-  hint "model — идентификатор модели у вашего провайдера (как в его API / кабинете)."
-  hint "Пример формата: gpt-4o"
-  MODEL="$(read_default "Model" "$MODEL")"
 fi
 if [[ -z "$API_KEY_ENV_NAME" ]]; then
   API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
@@ -643,18 +731,62 @@ if [[ -z "$API_KEY" ]]; then
 fi
 export "$API_KEY_ENV_NAME=$API_KEY"
 
+if [[ -z "$MODEL" ]]; then
+  MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
+fi
+[[ -n "$MODEL" ]] || MODEL="gpt-4o"
+
+declare -A AGENT_MODELS=()
+declare -A CLI_MODELS=(
+  ["1c-analyst"]="$MODEL_ANALYST"
+  ["1c-yaxunit"]="$MODEL_YAXUNIT"
+  ["1c-coder"]="$MODEL_CODER"
+  ["1c-implementer"]="$MODEL_IMPLEMENTER"
+)
+hint ""
+hint "model — id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
+hint "Плейсхолдер формата: gpt-4o (Enter — принять значение в скобках)."
+for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
+  env_name="$(agent_model_env_name "$agent")"
+  chosen="${CLI_MODELS[$agent]}"
+  if [[ -z "$chosen" ]]; then
+    chosen="$(env_or_file "$env_name" "$ENV_FILE")"
+  fi
+  if [[ -z "$chosen" ]]; then
+    chosen="$MODEL"
+  fi
+  chosen="$(read_default "Model for $agent" "$chosen")"
+  if [[ -z "$chosen" ]]; then
+    echo "model for $agent is required" >&2
+    exit 1
+  fi
+  AGENT_MODELS["$agent"]="$chosen"
+done
+
 KBSHFF_BIN="$(ensure_kbshff)"
 BSL_INDEXER="$(ensure_indexer)"
-BSL_LS_JAR="$(ensure_jar)"
 BSL_LS_MCP="$(ensure_mcp_js)"
+BSL_LS_JAR=""
+if [[ -n "$BSL_LS_MCP" ]] || [[ -n "$(env_or_file BSL_LS_JAR "$ENV_FILE")" ]]; then
+  BSL_LS_JAR="$(ensure_jar)"
+else
+  echo "Skipping BSL LS JAR (no bsl-ls-mcp path). Set BSL_LS_MCP / install Node, or use your own MCP."
+fi
 SNTX_OUT="$(ensure_sntx)"
 SNTX_SEM_CONFIG="$(printf '%s\n' "$SNTX_OUT" | sed -n '1p')"
 SNTX_SEM_PYTHON="$(printf '%s\n' "$SNTX_OUT" | sed -n '2p')"
-JAVA_HOME_VAL="$(resolve_java_home || true)"
+JAVA_HOME_VAL=""
+if [[ -n "$BSL_LS_JAR" || -n "$BSL_LS_MCP" ]]; then
+  JAVA_HOME_VAL="$(resolve_java_home || true)"
+fi
 
 {
   echo "KBSHFF_PROVIDER_BASE_URL=$BASE_URL"
   echo "KBSHFF_PROVIDER_MODEL=$MODEL"
+  echo "KBSHFF_PROVIDER_MODEL_1C_ANALYST=${AGENT_MODELS[1c-analyst]}"
+  echo "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT=${AGENT_MODELS[1c-yaxunit]}"
+  echo "KBSHFF_PROVIDER_MODEL_1C_CODER=${AGENT_MODELS[1c-coder]}"
+  echo "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER=${AGENT_MODELS[1c-implementer]}"
   echo "KBSHFF_PROVIDER_API_KEY_ENV=$API_KEY_ENV_NAME"
   echo "${API_KEY_ENV_NAME}=$API_KEY"
   echo "SNTX_SEM_CONFIG=$SNTX_SEM_CONFIG"
@@ -664,17 +796,23 @@ JAVA_HOME_VAL="$(resolve_java_home || true)"
   echo "BSL_LS_MCP=$BSL_LS_MCP"
   echo "BSL_LS_JAR=$BSL_LS_JAR"
   echo "KBSHFF_BIN=$KBSHFF_BIN"
-  [[ -n "$JAVA_HOME_VAL" ]] && echo "JAVA_HOME=$JAVA_HOME_VAL"
+  echo "JAVA_HOME=$JAVA_HOME_VAL"
 } | dotenv_set_many "$ENV_FILE"
 
 export KBSHFF_PROVIDER_BASE_URL="$BASE_URL"
 export KBSHFF_PROVIDER_MODEL="$MODEL"
+export KBSHFF_PROVIDER_MODEL_1C_ANALYST="${AGENT_MODELS[1c-analyst]}"
+export KBSHFF_PROVIDER_MODEL_1C_YAXUNIT="${AGENT_MODELS[1c-yaxunit]}"
+export KBSHFF_PROVIDER_MODEL_1C_CODER="${AGENT_MODELS[1c-coder]}"
+export KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER="${AGENT_MODELS[1c-implementer]}"
 export KBSHFF_PROVIDER_API_KEY_ENV="$API_KEY_ENV_NAME"
-export SNTX_SEM_CONFIG BSL_INDEXER BSL_LS_MCP BSL_LS_JAR KBSHFF_BIN SNTX_SEM_PYTHON
+export SNTX_SEM_CONFIG BSL_INDEXER KBSHFF_BIN SNTX_SEM_PYTHON
+[[ -n "$BSL_LS_MCP" ]] && export BSL_LS_MCP
+[[ -n "$BSL_LS_JAR" ]] && export BSL_LS_JAR
 [[ -n "$JAVA_HOME_VAL" ]] && export JAVA_HOME="$JAVA_HOME_VAL"
 echo "Wrote $ENV_FILE"
 
-install_conveyor_profiles "$KBSHFF_BIN" "$REPO_ROOT" "$BASE_URL" "$MODEL" "$API_KEY_ENV_NAME"
+install_conveyor_profiles "$KBSHFF_BIN" "$REPO_ROOT" "$BASE_URL" "$API_KEY_ENV_NAME"
 
 step "harness dry-run"
 oscript -encoding=utf-8 "$REPO_ROOT/harness/run.os" --repo-root "$REPO_ROOT" --dry-run
