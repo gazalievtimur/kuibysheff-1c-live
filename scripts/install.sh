@@ -60,8 +60,16 @@ fi
 step() { echo "==> $*"; }
 hint() {
   if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
-    echo "$*"
+    if [[ -z "$*" ]]; then
+      echo ""
+    else
+      printf '\033[90m%s\033[0m\n' "$*"
+    fi
   fi
+}
+write_input_label() {
+  local prompt="$1"
+  printf '\033[46;30m[ВВОД]\033[0m \033[36m%s\033[0m: ' "$prompt"
 }
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -99,7 +107,8 @@ confirm_optional_host_gaps() {
     return
   fi
   local ans
-  read -r -p "Продолжить установку без них? [y/N]: " ans || true
+  write_input_label "Подтверждение: продолжить без рекомендуемых инструментов? [y/N]"
+  read -r ans || true
   case "$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')" in
     y|yes|д|да) echo "Continuing without recommended tools..." ;;
     *)
@@ -202,9 +211,10 @@ read_default() {
     printf '%s' "$default"
     return
   fi
-  local suffix="" value
-  [[ -n "$default" ]] && suffix=" [$default]"
-  read -r -p "${prompt}${suffix}: " value || true
+  local label="$prompt" value
+  [[ -n "$default" ]] && label="${prompt} [${default}]"
+  write_input_label "$label"
+  read -r value || true
   if [[ -z "$value" ]]; then
     printf '%s' "$default"
   else
@@ -218,9 +228,24 @@ read_secret() {
     printf ''
     return
   fi
-  read -r -s -p "${prompt}: " value || true
+  write_input_label "$prompt"
+  read -r -s value || true
   echo "" >&2
   printf '%s' "$value"
+}
+
+valid_env_var_name() {
+  [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
+}
+
+looks_like_api_key() {
+  local v="$1"
+  [[ -z "$v" ]] && return 1
+  [[ "$v" =~ ^[Ss][Kk][-_] ]] && return 0
+  if [[ ${#v} -ge 20 ]] && ! valid_env_var_name "$v"; then
+    return 0
+  fi
+  return 1
 }
 
 env_or_file() {
@@ -333,7 +358,8 @@ ensure_oscript() {
   echo "Установим OneScript через OVM: https://github.com/oscript-library/ovm"
   echo "Версия: $OSCRIPT_VERSION (на Linux/macOS для ovm.exe нужен Mono 6+)."
   if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
-    read -r -p "Установить OneScript ($OSCRIPT_VERSION) через ovm? [Y/n]: " ans || true
+    write_input_label "Подтверждение: установить OneScript ($OSCRIPT_VERSION) через ovm? [Y/n]"
+    read -r ans || true
     case "$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')" in
       n|no|н|нет)
         echo "oscript required. Install via OVM (docs/prerequisites.md) or re-run and accept install." >&2
@@ -598,8 +624,7 @@ select_platform_bin_for_ingest() {
   mapfile -t bins < <(find_1c_platform_bins)
   if [[ "${#bins[@]}" -eq 0 ]]; then
     hint "Установленные 8.3.*/bin не найдены автоматически."
-    read -r -p "Run sntx_sem ingest? Enter path to platform bin, or leave empty to skip: " choice || true
-    printf '%s' "$choice"
+    read_default "Путь к bin платформы 1С (пусто = пропуск)" ""
     return
   fi
   echo "Найдены каталоги bin платформы:"
@@ -610,14 +635,13 @@ select_platform_bin_for_ingest() {
   skip=$((${#bins[@]} + 2))
   echo "  [$manual] ввести путь вручную"
   echo "  [$skip] пропустить ingest"
-  read -r -p "Выбор [1]: " choice || true
-  [[ -z "$choice" ]] && choice=1
+  choice="$(read_default "Номер выбора" "1")"
   if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 && "$choice" -le "${#bins[@]}" ]]; then
     printf '%s' "${bins[$((choice - 1))]}"
     return
   fi
   if [[ "$choice" == "$manual" ]]; then
-    read_default "Path to 1C platform bin" ""
+    read_default "Путь к bin платформы 1С (пусто = пропуск)" ""
     return
   fi
   printf ''
@@ -695,7 +719,7 @@ resolve_java_home() {
   hint ""
   hint "JAVA_HOME нужен штатному MCP bsl-language-server (анализ BSL). Можно оставить пустым, если свой MCP без Java."
   hint "Обнаружен Java home: $detected"
-  read_default "JAVA_HOME" "$detected"
+  read_default "Путь JAVA_HOME" "$detected"
 }
 
 apply_provider() {
@@ -798,21 +822,45 @@ if [[ -z "$BASE_URL" ]]; then
   [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
   hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
   hint "Пример формата: https://api.example.com/v1"
-  BASE_URL="$(read_default "Provider base_url" "$BASE_URL")"
+  BASE_URL="$(read_default "URL эндпоинта (base_url)" "$BASE_URL")"
 fi
+PASTED_API_KEY=""
 if [[ -z "$API_KEY_ENV_NAME" ]]; then
   API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
   [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="OPENAI_API_KEY"
   hint ""
-  hint "api_key_env — ИМЯ переменной окружения, в которой лежит ключ (не сам ключ)."
-  hint "kbshff читает секрет из env с этим именем. Пример формата: OPENAI_API_KEY"
-  API_KEY_ENV_NAME="$(read_default "API key env var name" "$API_KEY_ENV_NAME")"
+  hint "Имя переменной окружения для API-ключа (не сам ключ)."
+  hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
+  hint "kbshff читает секрет из env с этим именем."
+  RAW_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+  if looks_like_api_key "$RAW_ENV_NAME"; then
+    echo "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY." >&2
+    PASTED_API_KEY="$RAW_ENV_NAME"
+    API_KEY_ENV_NAME="OPENAI_API_KEY"
+    API_KEY_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+  else
+    API_KEY_ENV_NAME="$RAW_ENV_NAME"
+  fi
+  if ! valid_env_var_name "$API_KEY_ENV_NAME"; then
+    echo "Invalid API key env var name '$API_KEY_ENV_NAME'. Use something like OPENAI_API_KEY." >&2
+    exit 1
+  fi
 fi
-API_KEY="$(env_or_file "$API_KEY_ENV_NAME" "$ENV_FILE")"
+API_KEY="$PASTED_API_KEY"
+if [[ -z "$API_KEY" ]]; then
+  API_KEY="$(env_or_file "$API_KEY_ENV_NAME" "$ENV_FILE")"
+fi
 if [[ -z "$API_KEY" ]]; then
   hint ""
-  hint "Значение ключа для ${API_KEY_ENV_NAME}: ввод скрыт, в историю команд и argv не попадает."
-  API_KEY="$(read_secret "Value for ${API_KEY_ENV_NAME}")"
+  hint "Значение ключа для переменной ${API_KEY_ENV_NAME}."
+  hint "Ввод скрыт (символы не видны). Вставьте ключ и нажмите Enter."
+  attempt=1
+  while [[ $attempt -le 3 ]]; do
+    API_KEY="$(read_secret "Значение API-ключа (${API_KEY_ENV_NAME})")"
+    [[ -n "$API_KEY" ]] && break
+    echo "Пустой ввод (попытка $attempt/3). Вставьте ключ ещё раз — символы не отображаются." >&2
+    attempt=$((attempt + 1))
+  done
 fi
 if [[ -z "$API_KEY" ]]; then
   echo "API key for $API_KEY_ENV_NAME is required" >&2
@@ -844,7 +892,7 @@ for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
   if [[ -z "$chosen" ]]; then
     chosen="$MODEL"
   fi
-  chosen="$(read_default "Model for $agent" "$chosen")"
+  chosen="$(read_default "Модель для $agent" "$chosen")"
   if [[ -z "$chosen" ]]; then
     echo "model for $agent is required" >&2
     exit 1

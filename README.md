@@ -45,7 +45,7 @@ CLI агента: install сам найдёт `kbshff` в `PATH` / `KBSHFF_BIN` 
 | Вопрос | Зачем | Плейсхолдер формата |
 | --- | --- | --- |
 | `base_url` | общий эндпоинт `/v1` | `https://api.openai.com/v1` |
-| имя env ключа | `provider set --api-key-env` | `OPENAI_API_KEY` |
+| `Имя` переменной ключа | `provider set --api-key-env` (не сам ключ) | `OPENAI_API_KEY` |
 | значение ключа | только в `.env` / окружение | вводится скрыто, либо уже задано в env |
 | `model` × 4 | id модели для `1c-analyst` / `yaxunit` / `coder` / `implementer` | `gpt-4o` |
 
