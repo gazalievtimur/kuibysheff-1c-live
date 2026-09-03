@@ -10,9 +10,16 @@ param(
     [switch]$NonInteractive,
     [string]$BaseUrl = "",
     [string]$Model = "",
+    [string]$ModelAnalyst = "",
+    [string]$ModelYaxunit = "",
+    [string]$ModelCoder = "",
+    [string]$ModelImplementer = "",
     [string]$ApiKeyEnvName = "",
     [string]$PlatformPath = ""
 )
+
+# Per-agent models (shared base_url / api_key). Populated by Read-ProviderSettings.
+$script:AgentModels = @{}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -92,10 +99,18 @@ function Format-DotEnvValue([string]$Value) {
     return "'$Value'"
 }
 
+function Get-AgentModelEnvName([string]$AgentId) {
+    return "KBSHFF_PROVIDER_MODEL_" + ($AgentId.ToUpperInvariant() -replace '-', '_')
+}
+
 function Save-DotEnv([string]$Path, [hashtable]$Map) {
     $order = @(
         "KBSHFF_PROVIDER_BASE_URL",
         "KBSHFF_PROVIDER_MODEL",
+        "KBSHFF_PROVIDER_MODEL_1C_ANALYST",
+        "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT",
+        "KBSHFF_PROVIDER_MODEL_1C_CODER",
+        "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER",
         "KBSHFF_PROVIDER_API_KEY_ENV",
         "OPENAI_API_KEY",
         "POLZA_API_KEY",
@@ -175,6 +190,35 @@ function Require-HostTool([string]$Name, [string]$Hint) {
         return
     }
     throw "$Name not found in PATH. $Hint"
+}
+
+function Confirm-OptionalHostGaps([string[]]$Gaps) {
+    if ($null -eq $Gaps -or $Gaps.Count -eq 0) {
+        return
+    }
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host "ВНИМАНИЕ: рекомендуемые инструменты не найдены" -ForegroundColor Yellow
+    Write-Host "============================================================" -ForegroundColor Yellow
+    foreach ($gap in $Gaps) {
+        Write-Host "  * $gap" -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "Рекомендуем установить их СЕЙЧАС (до продолжения install):" -ForegroundColor Yellow
+    Write-Host "  docs/prerequisites.md" -ForegroundColor Yellow
+    Write-Host "Без Node.js / Java 17+ штатный MCP bsl-language-server не настроится." -ForegroundColor Yellow
+    Write-Host "Без bin платформы 1С ingest справки sntx_sem будет недоступен (семантический поиск)." -ForegroundColor Yellow
+    Write-Host "Свой MCP без Node/Java можно подключить позже через CLI / .env." -ForegroundColor Yellow
+    Write-Host ""
+    if ($NonInteractive) {
+        Write-Warning "NonInteractive: продолжаем без рекомендуемых инструментов."
+        return
+    }
+    $ans = Read-Host "Продолжить установку без них? [y/N]"
+    if ($ans -notmatch '^(?i)(y|yes|д|да)$') {
+        throw "Install cancelled. Install missing tools (see docs/prerequisites.md) and re-run."
+    }
+    Write-Host "Continuing without recommended tools..."
 }
 
 function Find-Python {
@@ -441,7 +485,7 @@ function Ensure-BslIndexer([hashtable]$EnvMap) {
 }
 
 function Ensure-BslLsJar([hashtable]$EnvMap) {
-    Write-Step "bsl-language-server JAR"
+    Write-Step "bsl-language-server JAR (optional)"
     $existing = Get-EnvOrMap $EnvMap "BSL_LS_JAR"
     if ($existing -and (Test-Path -LiteralPath $existing -PathType Leaf)) {
         return (Resolve-Path -LiteralPath $existing).Path
@@ -456,14 +500,24 @@ function Ensure-BslLsJar([hashtable]$EnvMap) {
         Copy-Item -LiteralPath $homeJar -Destination $stable -Force
         return (Resolve-Path $stable).Path
     }
+    if (-not (Test-Command "curl") -and -not (Test-Command "curl.exe")) {
+        Write-Warning "Skipping BSL LS JAR download (no curl). Default bsl-language-server MCP needs JAR+Java; see docs/prerequisites.md"
+        return ""
+    }
     New-Item -ItemType Directory -Force -Path (Split-Path $stable) | Out-Null
-    $asset = Get-GithubReleaseAsset "1c-syntax/bsl-language-server" "*-exec.jar"
-    Save-RemoteFile -Uri $asset.browser_download_url -OutFile $stable -Activity "bsl-language-server JAR"
-    return (Resolve-Path $stable).Path
+    try {
+        $asset = Get-GithubReleaseAsset "1c-syntax/bsl-language-server" "*-exec.jar"
+        Save-RemoteFile -Uri $asset.browser_download_url -OutFile $stable -Activity "bsl-language-server JAR"
+        return (Resolve-Path $stable).Path
+    }
+    catch {
+        Write-Warning "Skipping BSL LS JAR: $_"
+        return ""
+    }
 }
 
 function Ensure-BslLsMcp([hashtable]$EnvMap) {
-    Write-Step "bsl-ls-mcp"
+    Write-Step "bsl-ls-mcp (optional; needs Node.js)"
     $homeJs = Join-Path $env:USERPROFILE ".claude\bsl-ls-mcp\server.js"
     $vendorJs = Join-Path $ToolsDir "bsl-ls-mcp\server.js"
     $existing = Get-EnvOrMap $EnvMap "BSL_LS_MCP"
@@ -471,22 +525,27 @@ function Ensure-BslLsMcp([hashtable]$EnvMap) {
         $existing = Get-EnvOrMap $EnvMap "BSL_LS_SERVER"
     }
     if ($existing -and (Test-Path -LiteralPath $existing -PathType Leaf)) {
-        $chosen = (Resolve-Path -LiteralPath $existing).Path
+        return (Resolve-Path -LiteralPath $existing).Path
     }
-    elseif (Test-Path -LiteralPath $homeJs -PathType Leaf) {
-        $chosen = (Resolve-Path $homeJs).Path
+    if (Test-Path -LiteralPath $homeJs -PathType Leaf) {
+        return (Resolve-Path $homeJs).Path
     }
-    else {
-        $chosen = $vendorJs
+    if (-not (Test-Command "npm")) {
+        Write-Warning "Skipping tools/bsl-ls-mcp (Node.js/npm not found). Install Node for default BSL MCP, or point BSL_LS_MCP at your own server. docs/prerequisites.md"
+        return ""
     }
-    if ($chosen -eq $vendorJs -or $chosen.StartsWith((Join-Path $ToolsDir "bsl-ls-mcp"))) {
-        if (-not (Test-Command "npm")) {
-            throw "npm not found (needed for tools/bsl-ls-mcp). Install Node.js: https://nodejs.org/"
-        }
+    if (-not (Test-Path -LiteralPath $vendorJs -PathType Leaf)) {
+        Write-Warning "Skipping bsl-ls-mcp: missing $vendorJs"
+        return ""
+    }
+    try {
         Invoke-NativeProcess -FilePath "npm" -ArgumentList @("install", "--omit=dev") -WorkDir (Join-Path $ToolsDir "bsl-ls-mcp") -FailMessage "npm install failed in tools/bsl-ls-mcp"
-        $chosen = (Resolve-Path $vendorJs).Path
+        return (Resolve-Path $vendorJs).Path
     }
-    return $chosen
+    catch {
+        Write-Warning "Skipping bsl-ls-mcp: $_"
+        return ""
+    }
 }
 
 function Find-1cPlatformBins {
@@ -630,7 +689,8 @@ function Resolve-JavaHome([hashtable]$EnvMap) {
     }
     $java = Get-CommandPath "java"
     if (-not $java) {
-        throw "java not found. Install JDK 17+: https://adoptium.net/"
+        Write-Warning "Java not found (optional). Default BSL language-server MCP needs JDK 17+. docs/prerequisites.md"
+        return ""
     }
     $oldEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -651,7 +711,7 @@ function Resolve-JavaHome([hashtable]$EnvMap) {
         return $detected
     }
     Write-Hint ""
-    Write-Hint "JAVA_HOME нужен MCP bsl-language-server (анализ BSL)."
+    Write-Hint "JAVA_HOME нужен штатному MCP bsl-language-server (анализ BSL). Можно оставить пустым, если свой MCP без Java."
     Write-Hint "Обнаружен Java home: $detected"
     return Read-Default "JAVA_HOME" $detected
 }
@@ -699,14 +759,18 @@ function Invoke-KbshffProvider([string]$Kbshff, [string]$ProjectRoot, [string]$A
     Invoke-NativeProcess -FilePath $Kbshff -ArgumentList @("check", "--project-root", $ProjectRoot, "--agent", $AgentId, "--skip-mcp", "--skip-sandbox") -FailMessage "kbshff check $AgentId failed"
 }
 
-function Install-ConveyorProfiles([string]$Kbshff, [string]$ProjectRoot, [string]$ProvBaseUrl, [string]$ProvModel, [string]$ProvKeyEnv) {
+function Install-ConveyorProfiles([string]$Kbshff, [string]$ProjectRoot, [string]$ProvBaseUrl, [hashtable]$ProvModels, [string]$ProvKeyEnv) {
     Write-Step "Conveyor profiles (all skills)"
     $agents = Get-ConveyorAgents
     $total = $agents.Count
     $i = 0
     foreach ($agent in $agents) {
         $i++
-        Invoke-KbshffProvider $Kbshff $ProjectRoot $agent.Id $agent.Skills $ProvBaseUrl $ProvModel $ProvKeyEnv "[$i/$total]"
+        $model = [string]$ProvModels[$agent.Id]
+        if ([string]::IsNullOrWhiteSpace($model)) {
+            throw "model for agent $($agent.Id) is empty"
+        }
+        Invoke-KbshffProvider $Kbshff $ProjectRoot $agent.Id $agent.Skills $ProvBaseUrl $model $ProvKeyEnv "[$i/$total]"
     }
 }
 
@@ -715,6 +779,7 @@ function Read-ProviderSettings([hashtable]$EnvMap) {
     if (-not $NonInteractive) {
         Write-Host ""
         Write-Host "Нужен любой OpenAI-compatible HTTP API (Chat Completions)."
+        Write-Host "Эндпоинт (base_url) и ключ - общие; модель задаётся отдельно для каждого агента конвейера."
         Write-Host "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
         Write-Host "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
         Write-Host "Значения по умолчанию - плейсхолдеры формата, не рекомендация конкретного вендора."
@@ -723,17 +788,9 @@ function Read-ProviderSettings([hashtable]$EnvMap) {
     if (-not $script:BaseUrl) {
         $script:BaseUrl = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_BASE_URL"
         if (-not $script:BaseUrl) { $script:BaseUrl = "https://api.openai.com/v1" }
-        Write-Hint "base_url - URL эндпоинта до /v1, куда kbshff шлёт запросы к модели."
+        Write-Hint "base_url - общий URL эндпоинта до /v1 для всех агентов."
         Write-Hint "Пример формата: https://api.example.com/v1"
         $script:BaseUrl = Read-Default "Provider base_url" $script:BaseUrl
-    }
-    if (-not $script:Model) {
-        $script:Model = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_MODEL"
-        if (-not $script:Model) { $script:Model = "gpt-4o" }
-        Write-Hint ""
-        Write-Hint "model - идентификатор модели у вашего провайдера (как в его API / кабинете)."
-        Write-Hint "Пример формата: gpt-4o"
-        $script:Model = Read-Default "Model" $script:Model
     }
     if (-not $script:ApiKeyEnvName) {
         $script:ApiKeyEnvName = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_API_KEY_ENV"
@@ -756,21 +813,77 @@ function Read-ProviderSettings([hashtable]$EnvMap) {
         throw "API key for $($script:ApiKeyEnvName) is required (set env, .env, or enter it interactively)"
     }
     [Environment]::SetEnvironmentVariable($script:ApiKeyEnvName, $apiKey, "Process")
+
+    $defaultModel = $script:Model
+    if (-not $defaultModel) {
+        $defaultModel = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_MODEL"
+    }
+    if (-not $defaultModel) {
+        $defaultModel = "gpt-4o"
+    }
+    $script:Model = $defaultModel
+
+    $cliByAgent = @{
+        "1c-analyst"     = $script:ModelAnalyst
+        "1c-yaxunit"     = $script:ModelYaxunit
+        "1c-coder"       = $script:ModelCoder
+        "1c-implementer" = $script:ModelImplementer
+    }
+    Write-Hint ""
+    Write-Hint "model - id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
+    Write-Hint "Плейсхолдер формата: gpt-4o (Enter - принять значение в скобках)."
+    $script:AgentModels = @{}
+    foreach ($agent in (Get-ConveyorAgents)) {
+        $envName = Get-AgentModelEnvName $agent.Id
+        $chosen = [string]$cliByAgent[$agent.Id]
+        if (-not $chosen) {
+            $chosen = Get-EnvOrMap $EnvMap $envName
+        }
+        if (-not $chosen) {
+            $chosen = $defaultModel
+        }
+        $chosen = Read-Default "Model for $($agent.Id)" $chosen
+        if ([string]::IsNullOrWhiteSpace($chosen)) {
+            throw "model for $($agent.Id) is required"
+        }
+        $script:AgentModels[$agent.Id] = $chosen
+    }
     return $apiKey
 }
 
 # --- main ---
 
 Write-Step "Host tools"
-Require-HostTool "oscript" "Install OneScript 2.0: https://oscript.io/"
-Require-HostTool "git" "https://git-scm.com/"
-Require-HostTool "node" "https://nodejs.org/"
-Require-HostTool "java" "JDK 17+: https://adoptium.net/"
+Require-HostTool "oscript" "Install OneScript 2.0: https://oscript.io/ - see docs/prerequisites.md"
+Require-HostTool "git" "https://git-scm.com/ - see docs/prerequisites.md"
+$optionalGaps = New-Object System.Collections.Generic.List[string]
+if (Test-Command "node") {
+    Write-Host "OK  node (recommended for BSL LS MCP)"
+}
+else {
+    $optionalGaps.Add("Node.js (LTS) + npm - штатный tools/bsl-ls-mcp. https://nodejs.org/  (docs/prerequisites.md)")
+}
+if (Test-Command "java") {
+    Write-Host "OK  java (recommended for BSL LS JAR, JDK 17+)"
+}
+else {
+    $optionalGaps.Add("Java / JDK 17+ - запуск bsl-language-server JAR. https://adoptium.net/  (docs/prerequisites.md)")
+}
 $pythonCmd = Find-Python
 if ($pythonCmd.Count -eq 0) {
-    throw "Python 3 not found (py / python / python3). Needed for 1c-sntx-sem."
+    throw "Python 3 not found (py / python / python3). Needed for 1c-sntx-sem. docs/prerequisites.md"
 }
 Write-Host "OK  python ($($pythonCmd -join ' '))"
+if (-not $SkipIngest -and -not $PlatformPath) {
+    $platformBins = @(Find-1cPlatformBins)
+    if ($platformBins.Count -eq 0) {
+        $optionalGaps.Add("Платформа 1С (каталог bin 8.3.* с 1cv8/ibcmd) - для ingest sntx_sem. Либо укажите -PlatformPath, либо -SkipIngest.")
+    }
+    else {
+        Write-Host "OK  1C platform bin (found $($platformBins.Count))"
+    }
+}
+Confirm-OptionalHostGaps @($optionalGaps)
 
 New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
 $envPath = Join-Path $RepoRoot ".env"
@@ -780,34 +893,59 @@ $apiKey = Read-ProviderSettings $envMap
 
 $kbshff = Ensure-Kbshff $envMap
 $indexer = Ensure-BslIndexer $envMap
-$jar = Ensure-BslLsJar $envMap
 $mcpJs = Ensure-BslLsMcp $envMap
+$jar = ""
+if ($mcpJs) {
+    $jar = Ensure-BslLsJar $envMap
+}
+elseif (Get-EnvOrMap $envMap "BSL_LS_JAR") {
+    $jar = Ensure-BslLsJar $envMap
+}
+else {
+    Write-Host "Skipping BSL LS JAR (no bsl-ls-mcp path). Set BSL_LS_MCP / install Node, or use your own MCP."
+}
 $sntx = Ensure-SntxSem $envMap $pythonCmd
-$javaHome = Resolve-JavaHome $envMap
+$javaHome = ""
+if ($jar -or $mcpJs) {
+    $javaHome = Resolve-JavaHome $envMap
+}
 
 $envMap["KBSHFF_PROVIDER_BASE_URL"] = $BaseUrl
 $envMap["KBSHFF_PROVIDER_MODEL"] = $Model
 $envMap["KBSHFF_PROVIDER_API_KEY_ENV"] = $ApiKeyEnvName
 $envMap[$ApiKeyEnvName] = $apiKey
+foreach ($agent in (Get-ConveyorAgents)) {
+    $envName = Get-AgentModelEnvName $agent.Id
+    $envMap[$envName] = [string]$script:AgentModels[$agent.Id]
+}
 $envMap["SNTX_SEM_CONFIG"] = $sntx.Config
 $envMap["SNTX_SEM_PYTHON"] = $sntx.Python
 $envMap["BSL_INDEXER"] = $indexer
 $envMap["CODE_INDEX_HOME"] = Split-Path -Parent $indexer
-$envMap["BSL_LS_MCP"] = $mcpJs
-$envMap["BSL_LS_JAR"] = $jar
+if ($mcpJs) { $envMap["BSL_LS_MCP"] = $mcpJs } else { $envMap.Remove("BSL_LS_MCP") }
+if ($jar) { $envMap["BSL_LS_JAR"] = $jar } else { $envMap.Remove("BSL_LS_JAR") }
 $envMap["KBSHFF_BIN"] = $kbshff
 if ($javaHome) {
     $envMap["JAVA_HOME"] = $javaHome
     [Environment]::SetEnvironmentVariable("JAVA_HOME", $javaHome, "Process")
 }
-foreach ($name in @("KBSHFF_PROVIDER_BASE_URL", "KBSHFF_PROVIDER_MODEL", "KBSHFF_PROVIDER_API_KEY_ENV", "SNTX_SEM_CONFIG", "SNTX_SEM_PYTHON", "BSL_INDEXER", "BSL_LS_MCP", "BSL_LS_JAR", "KBSHFF_BIN")) {
+$exportNames = @(
+    "KBSHFF_PROVIDER_BASE_URL", "KBSHFF_PROVIDER_MODEL",
+    "KBSHFF_PROVIDER_MODEL_1C_ANALYST", "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT",
+    "KBSHFF_PROVIDER_MODEL_1C_CODER", "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER",
+    "KBSHFF_PROVIDER_API_KEY_ENV", "SNTX_SEM_CONFIG", "SNTX_SEM_PYTHON",
+    "BSL_INDEXER", "KBSHFF_BIN"
+)
+foreach ($name in $exportNames) {
     [Environment]::SetEnvironmentVariable($name, $envMap[$name], "Process")
 }
+if ($mcpJs) { [Environment]::SetEnvironmentVariable("BSL_LS_MCP", $mcpJs, "Process") }
+if ($jar) { [Environment]::SetEnvironmentVariable("BSL_LS_JAR", $jar, "Process") }
 
 Save-DotEnv $envPath $envMap
 Write-Host "Wrote $envPath"
 
-Install-ConveyorProfiles $kbshff $RepoRoot $BaseUrl $Model $ApiKeyEnvName
+Install-ConveyorProfiles $kbshff $RepoRoot $BaseUrl $script:AgentModels $ApiKeyEnvName
 
 Write-Step "harness dry-run"
 $oscript = Get-CommandPath "oscript"

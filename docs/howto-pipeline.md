@@ -8,7 +8,9 @@
 
 ## 1. Установка
 
-Нужны в `PATH`: [OneScript 2.0](https://oscript.io/), Git, Node.js, Java 17+, Python 3 (`unzip` на Linux). `kbshff` install скачает из GitHub Releases в `tools/` (Windows/Linux x86_64); `cargo` — только fallback.
+Предустановка хост-инструментов (ссылки, что обязательно / что опционально): **[prerequisites.md](prerequisites.md)**.
+
+В `PATH` для install: OneScript 2.0, Git, Python 3, curl (`unzip` на Linux). **Node.js**, **Java 17+** и **bin платформы 1С** рекомендуются для полного стека; если их нет — install предупредит и спросит, продолжать ли (`docs/prerequisites.md`). `kbshff` install скачает из GitHub Releases в `tools/` (Windows/Linux x86_64); `cargo` — только fallback.
 
 ```powershell
 .\scripts\install.cmd
@@ -25,10 +27,10 @@ chmod +x scripts/install.sh
 
 Скрипт:
 
-1. Спрашивает `base_url`, `model`, имя переменной ключа и **значение ключа** (с пояснениями; ключ не в argv).
-2. Ставит MCP-инструменты и при необходимости `kbshff` в `tools/` (progress bar на загрузках) или переиспользует уже заданные пути / соседние clone.
+1. Спрашивает общий `base_url`, имя/значение ключа и **отдельную модель** для каждого из четырёх агентов (пояснения; ключ не в argv).
+2. Ставит MCP-инструменты и при необходимости `kbshff` в `tools/` (progress bar на загрузках) или переиспользует уже заданные пути / соседние clone. Штатный BSL LS (Node + JAR) ставится только если доступны Node/npm (иначе пропуск).
 3. Пишет `.env` (секреты и абсолютные пути).
-4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`), `[n/4]`: `init`, `config import` (`master_prompt.md` + **`skills.dsl`** + `rules.md`), `provider set`, проверка `skill list` и `check`. Профили пишутся в `.kuibysheff/` корня репозитория.
+4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`), `[n/4]`: `init`, `config import` (`master_prompt.md` + **`skills.dsl`** + `rules.md`), `provider set` со своей моделью, проверка `skill list` и `check`. Профили пишутся в `.kuibysheff/` корня репозитория.
 5. Гоняет `oscript … harness/run.os --dry-run`. После этого конвейер готов: `.\harness\run.cmd` / `./harness/run.sh`.
 
 Ingest справки `1c-sntx-sem` опционален: install предложит найденные `8.3.*\bin` (или путь вручную / пропуск). Без индекса семантический поиск `sntx_sem` на live-прогоне не работает. HBK в репозиторий не кладётся.
@@ -60,8 +62,9 @@ kbshff run --project-root <DIR> --agent <ID> --home homes/<task>/<stage> --promp
 
 | Переменная | Смысл |
 | --- | --- |
-| `KBSHFF_PROVIDER_BASE_URL` | `provider set --base-url` |
-| `KBSHFF_PROVIDER_MODEL` | `--model` |
+| `KBSHFF_PROVIDER_BASE_URL` | общий `provider set --base-url` |
+| `KBSHFF_PROVIDER_MODEL_1C_ANALYST` (и `_YAXUNIT` / `_CODER` / `_IMPLEMENTER`) | `--model` для соответствующего агента |
+| `KBSHFF_PROVIDER_MODEL` | запасной `--model`, если per-agent не задан |
 | `KBSHFF_PROVIDER_API_KEY_ENV` | `--api-key-env` |
 | значение этой env | секрет |
 | `SNTX_SEM_CONFIG`, `SNTX_SEM_PYTHON` | MCP справки |
@@ -69,7 +72,7 @@ kbshff run --project-root <DIR> --agent <ID> --home homes/<task>/<stage> --promp
 | `BSL_LS_MCP`, `BSL_LS_JAR`, `JAVA_HOME` | мост + JAR анализа BSL |
 | `KBSHFF_BIN` | явный путь к CLI |
 
-На live-прогоне харнес собирает MCP-пути под копию CF (они меняются каждый run), затем снова вызывает `config provider set` из `.env`, чтобы YAML-шаблон не затёр операторский провайдер.
+На live-прогоне харнес собирает MCP-пути под копию CF (они меняются каждый run), затем снова вызывает `config provider set` из `.env` (своя модель на агента), чтобы YAML-шаблон не затёр операторский провайдер.
 
 Полезные команды: `provider get`, `limits get`, `mcp list`, `tools effective`, `config show`.
 
@@ -164,7 +167,7 @@ MCP общие правила:
 | `missing provider API key env` | `.env` и имя из `KBSHFF_PROVIDER_API_KEY_ENV`; ключ не в YAML |
 | `kbshff check` не проходит | `kbshff config … provider get`; `base_url` доступен; `help config` |
 | `SNTX_SEM_CONFIG is required` | install / ingest; файл `config.yaml` существует |
-| нет `analyze` | `BSL_LS_MCP` → `tools/bsl-ls-mcp/server.js`, `npm install`; `BSL_LS_JAR` |
+| нет `analyze` / BSL LS | опционально: Node + `BSL_LS_MCP` + `BSL_LS_JAR` + Java ([prerequisites.md](prerequisites.md)); или свой MCP |
 | CF fingerprint changed | агент писал в копию CF; чинить профиль, не «коммитить фикстуру» |
 | FAIL при `goal_reached` | синоним имени теста / нет `agreements.md` |
 | `limit_reached` | `kbshff config … limits set` или лимиты в шаблоне стадии |

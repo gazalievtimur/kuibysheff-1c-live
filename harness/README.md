@@ -5,7 +5,7 @@ Live-eval для оттачивания `kbshff` + профилей `profiles/1c
 
 Не включайте этот gate в `check.ps1` агента с флагом вроде `-1c`. Запускайте отсюда.
 
-Машинный bootstrap (провайдер через `kbshff config … provider set`, MCP в `tools/`): [`scripts/install.ps1`](../scripts/install.ps1). How-to: [`docs/howto-pipeline.md`](../docs/howto-pipeline.md).
+Машинный bootstrap (провайдер через `kbshff config … provider set`, MCP в `tools/`): [`scripts/install.ps1`](../scripts/install.ps1). How-to: [`docs/howto-pipeline.md`](../docs/howto-pipeline.md). Предустановка: [`docs/prerequisites.md`](../docs/prerequisites.md) (Node/Java для штатного BSL LS — опционально).
 
 Конвейер: **analyst → yaxunit → coder → implementer**. YAxUnit пишет TDD-тесты
 (падают на baseline CF) по утверждённому плану и снимку публичной документации;

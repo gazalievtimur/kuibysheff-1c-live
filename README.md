@@ -6,19 +6,27 @@
 
 Отдельный example-репозиторий: можно изучать оркестрацию CLI с MCP-инструментами 1С или использовать как opt-in gate при разработке агента.
 
-**Как провести задачу по цепочке** (установка, CLI-конфиг, стадии, свой JSON в банке): [docs/howto-pipeline.md](docs/howto-pipeline.md).
+**Как провести задачу по цепочке** (установка, CLI-конфиг, стадии, свой JSON в банке): [docs/howto-pipeline.md](docs/howto-pipeline.md). Предустановка инструментов: [docs/prerequisites.md](docs/prerequisites.md).
 
 ## Требования
 
+Краткие инструкции и ссылки по установке инструментов: **[docs/prerequisites.md](docs/prerequisites.md)**.
+
+**Обязательно**
+
 - [OneScript](https://oscript.io/) 2.0 (`oscript` в `PATH`). Канон оркестратора: `oscript -encoding=utf-8 harness/run.os`. OPM-пакеты не нужны.
+- Git, Python 3 (runtime MCP `sntx_sem`), curl; на Linux ещё `unzip` для zip `kbshff`
 - `kbshff` в `PATH`, либо `KBSHFF_BIN`, либо install скачает release в `tools/` (Windows/Linux x86_64). `cargo` — только fallback, если release недоступен
 - API-ключ провайдера в env (имя по умолчанию — плейсхолдер `OPENAI_API_KEY`). Параметры модели — через CLI `kbshff config … provider set`, не правкой protected YAML. Справка: `kbshff help config`
 - `SNTX_SEM_CONFIG` — путь к `config.yaml` из [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem)
 - `BSL_INDEXER` или `CODE_INDEX_BIN` — путь к `bsl-indexer` из [`code-index-mcp`](https://github.com/Regsorm/code-index-mcp)
-- `BSL_LS_MCP` + `BSL_LS_JAR` (+ `JAVA_HOME`) — MCP [BSL Language Server](https://github.com/1c-syntax/bsl-language-server) (`tools/bsl-ls-mcp` или layout `~\.claude\bsl-ls-mcp`)
-- Node + Java — runtime MCP `bsl-language-server` (не harness)
-- Python — **только** runtime MCP `sntx_sem`: явный `SNTX_SEM_PYTHON`, либо `1c-sntx-sem/.venv/.../python`, либо бинарь `sntx-sem` в `PATH`. Интерпретатор harness сюда не подставляется.
-- Опционально: платформа 1С / `ibcmd` (`--require-platform`)
+
+**Опционально**
+
+- Node.js + Java 17+ — для **штатного** MCP [BSL Language Server](https://github.com/1c-syntax/bsl-language-server) (`BSL_LS_MCP` + `BSL_LS_JAR` + `JAVA_HOME`). Каталог `bin` платформы 1С — для ingest. Если нет — install предупредит и спросит, продолжать ли ([prerequisites.md](docs/prerequisites.md)).
+- Платформа 1С / `ibcmd` (`--require-platform`)
+
+Python для harness не используется: только процесс MCP `sntx_sem` (`SNTX_SEM_PYTHON`, venv `1c-sntx-sem`, или `sntx-sem` в `PATH`).
 
 Лаунчер выставляет `KUIBYSHEFF_ALLOW_UNSANDBOXED_MCP=1` (stdio MCP + venv).
 
@@ -28,18 +36,18 @@ Install — машинный bootstrap: хост-проверки, MCP в `tools
 
 ### Что подготовить
 
-В `PATH` уже должны быть [OneScript](https://oscript.io/) 2.0 (`oscript`), Git, Node.js, Java 17+, Python 3. На Linux для распаковки `kbshff` нужен ещё `unzip`.
+Сначала поставьте хост-инструменты по **[docs/prerequisites.md](docs/prerequisites.md)** (OneScript, Git, Python 3, curl; Node/Java — по желанию для штатного BSL LS). На Linux для распаковки `kbshff` нужен ещё `unzip`.
 
 CLI агента: install сам найдёт `kbshff` в `PATH` / `KBSHFF_BIN` / соседнем checkout или **скачает** готовый бинарь из [GitHub Releases](https://github.com/gazalievtimur/Agent-Kuibysheff/releases) в `tools/` (Windows и Linux x86_64; без системных прав). `cargo` нужен только если release недоступен.
 
-Провайдер модели — любой OpenAI-compatible API. Скрипт подробно объяснит каждое поле и спросит четыре вещи (**ключ в argv не попадает**):
+Провайдер модели — любой OpenAI-compatible API. Эндпоинт и ключ общие; **модель спрашивается для каждого** из четырёх агентов. Скрипт объяснит поля (**ключ в argv не попадает**):
 
 | Вопрос | Зачем | Плейсхолдер формата |
 | --- | --- | --- |
-| `base_url` | эндпоинт `/v1` | `https://api.openai.com/v1` |
-| `model` | id модели у вашего провайдера | `gpt-4o` |
+| `base_url` | общий эндпоинт `/v1` | `https://api.openai.com/v1` |
 | имя env ключа | `provider set --api-key-env` | `OPENAI_API_KEY` |
 | значение ключа | только в `.env` / окружение | вводится скрыто, либо уже задано в env |
+| `model` × 4 | id модели для `1c-analyst` / `yaxunit` / `coder` / `implementer` | `gpt-4o` |
 
 Нужен доступ в сеть (GitHub: `kbshff`, `bsl-indexer`, JAR BSL LS, при необходимости clone `1c-sntx-sem`).
 
@@ -50,9 +58,9 @@ Windows: не меняйте ExecutionPolicy машины. Запускайте 
 ### Что делает скрипт
 
 1. Проверяет хост-инструменты.
-2. Спрашивает провайдера (с пояснениями) и пишет `.env` (ключ и абсолютные пути к MCP; Windows-пути в кавычках для dotenvy).
-3. Ставит или находит `kbshff` (release → `tools/`), `bsl-indexer`, JAR `bsl-language-server`, Node-мост `tools/bsl-ls-mcp`, Python-venv `1c-sntx-sem`. Долгие загрузки — с progress bar (`curl`).
-4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`), счётчик `[n/4]`: `kbshff init`, `config import` (`master_prompt.md` + `skills.dsl` + `rules.md`), `provider set`, `skill list`, `check`. Профили — в `.kuibysheff/` корня репозитория.
+2. Спрашивает провайдера (общий `base_url`/ключ + модель на каждого агента) и пишет `.env` (ключ и абсолютные пути к MCP; Windows-пути в кавычках для dotenvy).
+3. Ставит или находит `kbshff` (release → `tools/`), `bsl-indexer`, Python-venv `1c-sntx-sem`; при наличии Node/Java — JAR `bsl-language-server` и Node-мост `tools/bsl-ls-mcp` (иначе пропускает с предупреждением). Долгие загрузки — с progress bar (`curl`).
+4. Для **всех четырёх** профилей (`1c-analyst`, `1c-yaxunit`, `1c-coder`, `1c-implementer`), счётчик `[n/4]`: `kbshff init`, `config import` (`master_prompt.md` + `skills.dsl` + `rules.md`), `provider set` (своя модель), `skill list`, `check`. Профили — в `.kuibysheff/` корня репозитория.
 5. Гоняет `oscript … harness/run.os --dry-run` (офлайн: банк, фикстура CF, без LLM).
 
 Скрипт **не** стартует daemon `bsl-indexer` и **не** поднимает SearXNG / `ibcmd`. Для live-eval демон должен быть запущен в том же `CODE_INDEX_HOME`, что в `.env` (каталог `bsl-indexer`): `bsl-indexer daemon run`. Если в окружении уже задан чужой `CODE_INDEX_HOME`, harness его не перебьёт из `.env`.
@@ -82,7 +90,7 @@ oscript -encoding=utf-8 harness/run.os --dry-run
 ```text
 kbshff config --project-root <DIR> --agent 1c-analyst provider set \
   --base-url "$KBSHFF_PROVIDER_BASE_URL" \
-  --model "$KBSHFF_PROVIDER_MODEL" \
+  --model "$KBSHFF_PROVIDER_MODEL_1C_ANALYST" \
   --api-key-env "$KBSHFF_PROVIDER_API_KEY_ENV"
 ```
 
@@ -94,6 +102,7 @@ harness/          OneScript eval, bank, CF-фикстура, docs YAxUnit
 scripts/          install, resolve-kbshff, регрессия
 tools/bsl-ls-mcp  Node-мост analyze(srcDir) → JAR
 docs/howto-pipeline.md
+docs/prerequisites.md
 docs/searxng/     опциональные заметки по SearXNG
 ```
 
