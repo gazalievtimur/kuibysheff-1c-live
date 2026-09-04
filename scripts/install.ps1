@@ -17,8 +17,8 @@ param(
     [string]$ApiKeyEnvName = "",
     [string]$PlatformPath = "",
     [string]$OscriptVersion = "stable",
-    # Last known-good upstream rev with src/sntx_sem/config.py (main deleted it in c1fe5fed).
-    [string]$SntxSemGitRef = "c2468bcdef581784d714dae9ee45608cf8f100b3",
+    # Clone/ref for 1c-sntx-sem (default: main). Override only if you need an older tip.
+    [string]$SntxSemGitRef = "main",
     [switch]$Fresh
 )
 
@@ -840,28 +840,33 @@ function Select-PlatformBinForIngest {
     return ""
 }
 
+function Test-SntxSemConfigPresent([string]$Src) {
+    $legacy = Join-Path $Src "src\sntx_sem\config.py"
+    $pkg = Join-Path $Src "src\sntx_sem\config\__init__.py"
+    return (Test-Path -LiteralPath $legacy -PathType Leaf) -or (Test-Path -LiteralPath $pkg -PathType Leaf)
+}
+
 function Ensure-SntxSemGitCheckout([string]$Src) {
-    $configPy = Join-Path $Src "src\sntx_sem\config.py"
     $ref = $SntxSemGitRef
     $fromEnv = [Environment]::GetEnvironmentVariable("SNTX_SEM_GIT_REF", "Process")
     if (-not [string]::IsNullOrWhiteSpace($fromEnv)) {
         $ref = $fromEnv
     }
-    if (Test-Path -LiteralPath $configPy -PathType Leaf) {
+    if (Test-SntxSemConfigPresent $Src) {
         return
     }
     if (-not (Test-Command "git")) {
-        throw "1c-sntx-sem is missing src/sntx_sem/config.py (broken upstream tip) and git is unavailable to checkout $ref"
+        throw "1c-sntx-sem is missing sntx_sem.config (config.py or config/) and git is unavailable to checkout $ref"
     }
-    Write-Warning "1c-sntx-sem missing src/sntx_sem/config.py (upstream main is broken). Checking out $ref"
+    Write-Warning "1c-sntx-sem missing sntx_sem.config. Checking out $ref"
     $gitDir = Join-Path $Src ".git"
     if (-not (Test-Path -LiteralPath $gitDir)) {
         throw "Cannot repair 1c-sntx-sem at $Src (not a git checkout). Delete it and re-run install."
     }
     Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Src, "fetch", "--depth", "1", "origin", $ref) -FailMessage "git fetch 1c-sntx-sem $ref failed"
     Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Src, "checkout", "--force", "FETCH_HEAD") -FailMessage "git checkout 1c-sntx-sem $ref failed"
-    if (-not (Test-Path -LiteralPath $configPy -PathType Leaf)) {
-        throw "1c-sntx-sem still missing config.py after checkout $ref"
+    if (-not (Test-SntxSemConfigPresent $Src)) {
+        throw "1c-sntx-sem still missing sntx_sem.config after checkout $ref"
     }
 }
 
@@ -897,7 +902,7 @@ function Install-SntxSemEditable([string]$Src, [string]$VenvPy, [string[]]$Pytho
     Invoke-Python -PythonCmd @($VenvPy) -PythonArgs @("-m", "pip", "install", "-U", "pip")
     Invoke-Python -PythonCmd @($VenvPy) -PythonArgs @("-m", "pip", "install", "-e", ".") -WorkDir $Src
     if (-not (Test-SntxSemImport $VenvPy $Src)) {
-        throw "1c-sntx-sem import check failed (from sntx_sem.config import load_config). Pin SNTX_SEM_GIT_REF / -SntxSemGitRef to a revision that still has config.py."
+        throw "1c-sntx-sem import check failed (from sntx_sem.config import load_config). Try -SntxSemGitRef main or delete tools/1c-sntx-sem and re-run."
     }
 }
 

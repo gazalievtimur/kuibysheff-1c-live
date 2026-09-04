@@ -15,8 +15,8 @@ MODEL_IMPLEMENTER=""
 API_KEY_ENV_NAME=""
 PLATFORM_PATH=""
 OSCRIPT_VERSION="stable"
-# Last known-good upstream rev with src/sntx_sem/config.py (main deleted it in c1fe5fed).
-SNTX_SEM_GIT_REF="${SNTX_SEM_GIT_REF:-c2468bcdef581784d714dae9ee45608cf8f100b3}"
+# Clone/ref for 1c-sntx-sem (default: main). Override only if you need an older tip.
+SNTX_SEM_GIT_REF="${SNTX_SEM_GIT_REF:-main}"
 FRESH=0
 
 usage() {
@@ -750,16 +750,19 @@ select_platform_bin_for_ingest() {
 }
 
 ensure_sntx_git_checkout() {
-  local src="$1" config_py="$1/src/sntx_sem/config.py"
-  if [[ -f "$config_py" ]]; then
+  local src="$1"
+  if [[ -f "$src/src/sntx_sem/config.py" || -f "$src/src/sntx_sem/config/__init__.py" ]]; then
     return
   fi
-  have git || { echo "1c-sntx-sem missing config.py and git is unavailable to checkout $SNTX_SEM_GIT_REF" >&2; exit 1; }
-  echo "1c-sntx-sem missing src/sntx_sem/config.py (upstream main is broken). Checking out $SNTX_SEM_GIT_REF" >&2
+  have git || { echo "1c-sntx-sem missing sntx_sem.config and git is unavailable to checkout $SNTX_SEM_GIT_REF" >&2; exit 1; }
+  echo "1c-sntx-sem missing sntx_sem.config. Checking out $SNTX_SEM_GIT_REF" >&2
   [[ -d "$src/.git" ]] || { echo "Cannot repair $src (not a git checkout). Delete it and re-run install." >&2; exit 1; }
   git -C "$src" fetch --depth 1 origin "$SNTX_SEM_GIT_REF"
   git -C "$src" checkout --force FETCH_HEAD
-  [[ -f "$config_py" ]] || { echo "1c-sntx-sem still missing config.py after checkout $SNTX_SEM_GIT_REF" >&2; exit 1; }
+  if [[ ! -f "$src/src/sntx_sem/config.py" && ! -f "$src/src/sntx_sem/config/__init__.py" ]]; then
+    echo "1c-sntx-sem still missing sntx_sem.config after checkout $SNTX_SEM_GIT_REF" >&2
+    exit 1
+  fi
 }
 
 clone_sntx_sem() {
@@ -818,7 +821,7 @@ ensure_sntx() {
     "$venv_py" -m pip install -U pip
     (cd "$src" && "$venv_py" -m pip install -e .)
     if ! (cd "$src" && "$venv_py" -c "from sntx_sem.config import load_config"); then
-      echo "1c-sntx-sem import check failed. Pin --sntx-sem-git-ref / SNTX_SEM_GIT_REF to a revision with config.py." >&2
+      echo "1c-sntx-sem import check failed. Try --sntx-sem-git-ref main or delete tools/1c-sntx-sem and re-run." >&2
       exit 1
     fi
     config="$src/config.yaml"
