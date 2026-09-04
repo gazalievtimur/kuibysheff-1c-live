@@ -1138,32 +1138,33 @@ function Install-ConveyorProfiles([string]$Kbshff, [string]$ProjectRoot, [string
 }
 
 function Save-ProviderProgress([hashtable]$EnvMap, [string]$EnvPath, [string]$ApiKey) {
-    $script:InstallState.provider.base_url = [string]$script:BaseUrl
-    $script:InstallState.provider.api_key_env = [string]$script:ApiKeyEnvName
-    $script:InstallState.provider.model = [string]$script:Model
+    if (-not [string]::IsNullOrWhiteSpace($script:BaseUrl)) {
+        $script:InstallState.provider.base_url = [string]$script:BaseUrl
+        $EnvMap["KBSHFF_PROVIDER_BASE_URL"] = $script:BaseUrl
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:ApiKeyEnvName)) {
+        $script:InstallState.provider.api_key_env = [string]$script:ApiKeyEnvName
+        $EnvMap["KBSHFF_PROVIDER_API_KEY_ENV"] = $script:ApiKeyEnvName
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:Model)) {
+        $script:InstallState.provider.model = [string]$script:Model
+        $EnvMap["KBSHFF_PROVIDER_MODEL"] = $script:Model
+    }
     $am = @{}
-    foreach ($agent in (Get-ConveyorAgents)) {
-        if ($script:AgentModels.ContainsKey($agent.Id)) {
-            $am[$agent.Id] = [string]$script:AgentModels[$agent.Id]
+    if ($script:AgentModels) {
+        foreach ($agent in (Get-ConveyorAgents)) {
+            if ($script:AgentModels.ContainsKey($agent.Id) -and -not [string]::IsNullOrWhiteSpace([string]$script:AgentModels[$agent.Id])) {
+                $am[$agent.Id] = [string]$script:AgentModels[$agent.Id]
+                $EnvMap[(Get-AgentModelEnvName $agent.Id)] = [string]$script:AgentModels[$agent.Id]
+            }
         }
     }
     $script:InstallState.provider.agent_models = $am
-    Save-InstallState
-
-    $EnvMap["KBSHFF_PROVIDER_BASE_URL"] = $script:BaseUrl
-    $EnvMap["KBSHFF_PROVIDER_MODEL"] = $script:Model
-    $EnvMap["KBSHFF_PROVIDER_API_KEY_ENV"] = $script:ApiKeyEnvName
     if (-not [string]::IsNullOrWhiteSpace($ApiKey) -and -not [string]::IsNullOrWhiteSpace($script:ApiKeyEnvName)) {
         $EnvMap[$script:ApiKeyEnvName] = $ApiKey
     }
-    foreach ($agent in (Get-ConveyorAgents)) {
-        $envName = Get-AgentModelEnvName $agent.Id
-        if ($script:AgentModels.ContainsKey($agent.Id)) {
-            $EnvMap[$envName] = [string]$script:AgentModels[$agent.Id]
-        }
-    }
+    Save-InstallState
     Save-DotEnv $EnvPath $EnvMap
-    Write-Host "Wrote provider settings -> $EnvPath"
 }
 
 function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
@@ -1187,10 +1188,7 @@ function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
         if (-not $apiKey) {
             $apiKey = [Environment]::GetEnvironmentVariable($script:ApiKeyEnvName, "Process")
         }
-        if ([string]::IsNullOrWhiteSpace($apiKey)) {
-            Write-Warning "Checkpoint 'provider' set, but API key for $($script:ApiKeyEnvName) missing - asking again."
-        }
-        else {
+        if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
             $defaultModel = $script:Model
             if (-not $defaultModel) { $defaultModel = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_MODEL" }
             if (-not $defaultModel -and $script:InstallState.provider.model) {
@@ -1212,6 +1210,7 @@ function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
             Write-Host "OK  AI provider (skipped, checkpoint)"
             return $apiKey
         }
+        Write-Warning "Checkpoint 'provider' set, but API key for $($script:ApiKeyEnvName) missing - asking again."
     }
     if (-not $NonInteractive) {
         Write-Host ""
@@ -1219,56 +1218,49 @@ function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
         Write-Host "Эндпоинт (base_url) и ключ - общие; модель задаётся отдельно для каждого агента конвейера."
         Write-Host "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
         Write-Host "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
-        Write-Host "Значения по умолчанию - плейсхолдеры формата, не рекомендация конкретного вендора."
+        Write-Host "Enter — принять значение в скобках (из .env / прошлого запуска)."
         Write-Host ""
     }
+
     if (-not $script:BaseUrl) {
         $script:BaseUrl = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_BASE_URL"
         if (-not $script:BaseUrl -and $script:InstallState.provider.base_url) {
             $script:BaseUrl = [string]$script:InstallState.provider.base_url
         }
-        if ($script:BaseUrl) {
-            Write-Host "OK  base_url (.env/state): $script:BaseUrl"
-        }
-        else {
-            $script:BaseUrl = "https://api.openai.com/v1"
-            Write-Hint "base_url - общий URL эндпоинта до /v1 для всех агентов."
-            Write-Hint "Пример формата: https://api.example.com/v1"
-            $script:BaseUrl = Read-Default "URL эндпоинта (base_url)" $script:BaseUrl
-        }
+        if (-not $script:BaseUrl) { $script:BaseUrl = "https://api.openai.com/v1" }
+        Write-Hint "base_url - общий URL эндпоинта до /v1 для всех агентов."
+        Write-Hint "Пример формата: https://api.example.com/v1"
+        $script:BaseUrl = Read-Default "URL эндпоинта (base_url)" $script:BaseUrl
     }
-    $script:InstallState.provider.base_url = [string]$script:BaseUrl
-    Save-InstallState
+    Save-ProviderProgress $EnvMap $EnvPath ""
+
     $pastedApiKey = ""
     if (-not $script:ApiKeyEnvName) {
         $script:ApiKeyEnvName = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_API_KEY_ENV"
         if (-not $script:ApiKeyEnvName -and $script:InstallState.provider.api_key_env) {
             $script:ApiKeyEnvName = [string]$script:InstallState.provider.api_key_env
         }
-        if ($script:ApiKeyEnvName) {
-            Write-Host "OK  API key env (.env/state): $script:ApiKeyEnvName"
+        if (-not $script:ApiKeyEnvName) { $script:ApiKeyEnvName = "OPENAI_API_KEY" }
+        Write-Hint ""
+        Write-Hint "Имя переменной окружения для API-ключа (не сам ключ)."
+        Write-Hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
+        Write-Hint "kbshff читает секрет из env с этим именем."
+        $rawEnvName = Read-Default "Имя переменной для API-ключа" $script:ApiKeyEnvName
+        if (Test-LooksLikeApiKey $rawEnvName) {
+            Write-Warning "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY."
+            $pastedApiKey = $rawEnvName
+            $script:ApiKeyEnvName = "OPENAI_API_KEY"
+            $script:ApiKeyEnvName = Read-Default "Имя переменной для API-ключа" $script:ApiKeyEnvName
         }
         else {
-            $script:ApiKeyEnvName = "OPENAI_API_KEY"
-            Write-Hint ""
-            Write-Hint "Имя переменной окружения для API-ключа (не сам ключ)."
-            Write-Hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
-            Write-Hint "kbshff читает секрет из env с этим именем."
-            $rawEnvName = Read-Default "Имя переменной для API-ключа" $script:ApiKeyEnvName
-            if (Test-LooksLikeApiKey $rawEnvName) {
-                Write-Warning "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY."
-                $pastedApiKey = $rawEnvName
-                $script:ApiKeyEnvName = "OPENAI_API_KEY"
-                $script:ApiKeyEnvName = Read-Default "Имя переменной для API-ключа" $script:ApiKeyEnvName
-            }
-            else {
-                $script:ApiKeyEnvName = $rawEnvName
-            }
+            $script:ApiKeyEnvName = $rawEnvName
         }
         if (-not (Test-ValidEnvVarName $script:ApiKeyEnvName)) {
             throw "Invalid API key env var name '$($script:ApiKeyEnvName)'. Use something like OPENAI_API_KEY (letters, digits, underscore)."
         }
     }
+    Save-ProviderProgress $EnvMap $EnvPath ""
+
     $apiKey = $pastedApiKey
     if (-not $apiKey) {
         $apiKey = Get-EnvOrMap $EnvMap $script:ApiKeyEnvName
@@ -1276,7 +1268,17 @@ function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
     if (-not $apiKey) {
         $apiKey = [Environment]::GetEnvironmentVariable($script:ApiKeyEnvName, "Process")
     }
-    if (-not $apiKey) {
+    $hadStoredKey = -not [string]::IsNullOrWhiteSpace($apiKey)
+    if ($hadStoredKey -and -not $NonInteractive -and -not $pastedApiKey) {
+        Write-Hint ""
+        Write-Hint "Ключ для $($script:ApiKeyEnvName) уже есть в .env/окружении."
+        Write-Hint "Enter (пустой ввод) — оставить сохранённый; либо вставьте новый (ввод скрыт)."
+        $replacement = Read-Secret "Значение API-ключа ($($script:ApiKeyEnvName), Enter = оставить)"
+        if (-not [string]::IsNullOrWhiteSpace($replacement)) {
+            $apiKey = $replacement
+        }
+    }
+    elseif (-not $apiKey) {
         Write-Hint ""
         Write-Hint "Значение ключа для переменной $($script:ApiKeyEnvName)."
         Write-Hint "Ввод скрыт (символы не видны). Вставьте ключ и нажмите Enter."
@@ -1288,13 +1290,11 @@ function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
             Write-Warning "Пустой ввод (попытка $attempt/3). Вставьте ключ ещё раз - символы не отображаются."
         }
     }
-    else {
-        Write-Host "OK  API key (.env/env): $($script:ApiKeyEnvName)"
-    }
     if ([string]::IsNullOrWhiteSpace($apiKey)) {
         throw "API key for $($script:ApiKeyEnvName) is required (set env, .env, or enter it interactively)"
     }
     [Environment]::SetEnvironmentVariable($script:ApiKeyEnvName, $apiKey, "Process")
+    Save-ProviderProgress $EnvMap $EnvPath $apiKey
 
     $defaultModel = $script:Model
     if (-not $defaultModel) {
@@ -1314,6 +1314,9 @@ function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
         "1c-coder"       = $script:ModelCoder
         "1c-implementer" = $script:ModelImplementer
     }
+    Write-Hint ""
+    Write-Hint "model - id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
+    Write-Hint "Плейсхолдер формата: gpt-4o (Enter - принять значение в скобках)."
     $script:AgentModels = @{}
     foreach ($agent in (Get-ConveyorAgents)) {
         $envName = Get-AgentModelEnvName $agent.Id
@@ -1327,34 +1330,18 @@ function Read-ProviderSettings([hashtable]$EnvMap, [string]$EnvPath) {
         if (-not $chosen) {
             $chosen = $defaultModel
         }
+        $chosen = Read-Default "Модель для $($agent.Id)" $chosen
+        if ([string]::IsNullOrWhiteSpace($chosen)) {
+            throw "model for $($agent.Id) is required"
+        }
         $script:AgentModels[$agent.Id] = $chosen
+        Save-ProviderProgress $EnvMap $EnvPath $apiKey
     }
-    $haveAllModelsInEnv = $true
-    foreach ($agent in (Get-ConveyorAgents)) {
-        $envName = Get-AgentModelEnvName $agent.Id
-        if (-not (Get-EnvOrMap $EnvMap $envName) -and -not ($script:InstallState.provider.agent_models -and $script:InstallState.provider.agent_models.ContainsKey($agent.Id)) -and -not [string]$cliByAgent[$agent.Id]) {
-            $haveAllModelsInEnv = $false
-            break
-        }
-    }
-    if ($haveAllModelsInEnv) {
-        foreach ($agent in (Get-ConveyorAgents)) {
-            Write-Host "OK  model $($agent.Id): $($script:AgentModels[$agent.Id])"
-        }
-    }
-    else {
-        Write-Hint ""
-        Write-Hint "model - id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
-        Write-Hint "Плейсхолдер формата: gpt-4o (Enter - принять значение в скобках)."
-        foreach ($agent in (Get-ConveyorAgents)) {
-            $chosen = Read-Default "Модель для $($agent.Id)" ([string]$script:AgentModels[$agent.Id])
-            if ([string]::IsNullOrWhiteSpace($chosen)) {
-                throw "model for $($agent.Id) is required"
-            }
-            $script:AgentModels[$agent.Id] = $chosen
-        }
+    if (-not (Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_MODEL") -and $script:AgentModels.ContainsKey("1c-analyst")) {
+        $script:Model = [string]$script:AgentModels["1c-analyst"]
     }
     Save-ProviderProgress $EnvMap $EnvPath $apiKey
+    Write-Host "Wrote provider settings -> $EnvPath"
     Complete-InstallStep "provider"
     return $apiKey
 }

@@ -1077,27 +1077,26 @@ if step_done provider; then
 fi
 
 save_provider_progress() {
-  INSTALL_PROVIDER_BASE_URL="$BASE_URL"
-  INSTALL_PROVIDER_API_KEY_ENV="$API_KEY_ENV_NAME"
-  INSTALL_PROVIDER_MODEL="$MODEL"
-  INSTALL_PROVIDER_MODELS=()
-  declare -A INSTALL_PROVIDER_MODELS=()
+  INSTALL_PROVIDER_BASE_URL="${BASE_URL:-}"
+  INSTALL_PROVIDER_API_KEY_ENV="${API_KEY_ENV_NAME:-}"
+  INSTALL_PROVIDER_MODEL="${MODEL:-}"
   local agent
   for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
-    INSTALL_PROVIDER_MODELS["$agent"]="${AGENT_MODELS[$agent]}"
+    if [[ -n "${AGENT_MODELS[$agent]+x}" && -n "${AGENT_MODELS[$agent]}" ]]; then
+      INSTALL_PROVIDER_MODELS["$agent"]="${AGENT_MODELS[$agent]}"
+    fi
   done
   save_install_state
   {
-    echo "KBSHFF_PROVIDER_BASE_URL=$BASE_URL"
-    echo "KBSHFF_PROVIDER_MODEL=$MODEL"
-    echo "KBSHFF_PROVIDER_MODEL_1C_ANALYST=${AGENT_MODELS[1c-analyst]}"
-    echo "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT=${AGENT_MODELS[1c-yaxunit]}"
-    echo "KBSHFF_PROVIDER_MODEL_1C_CODER=${AGENT_MODELS[1c-coder]}"
-    echo "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER=${AGENT_MODELS[1c-implementer]}"
-    echo "KBSHFF_PROVIDER_API_KEY_ENV=$API_KEY_ENV_NAME"
-    echo "${API_KEY_ENV_NAME}=$API_KEY"
+    [[ -n "${BASE_URL:-}" ]] && echo "KBSHFF_PROVIDER_BASE_URL=$BASE_URL"
+    [[ -n "${MODEL:-}" ]] && echo "KBSHFF_PROVIDER_MODEL=$MODEL"
+    [[ -n "${AGENT_MODELS[1c-analyst]-}" ]] && echo "KBSHFF_PROVIDER_MODEL_1C_ANALYST=${AGENT_MODELS[1c-analyst]}"
+    [[ -n "${AGENT_MODELS[1c-yaxunit]-}" ]] && echo "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT=${AGENT_MODELS[1c-yaxunit]}"
+    [[ -n "${AGENT_MODELS[1c-coder]-}" ]] && echo "KBSHFF_PROVIDER_MODEL_1C_CODER=${AGENT_MODELS[1c-coder]}"
+    [[ -n "${AGENT_MODELS[1c-implementer]-}" ]] && echo "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER=${AGENT_MODELS[1c-implementer]}"
+    [[ -n "${API_KEY_ENV_NAME:-}" ]] && echo "KBSHFF_PROVIDER_API_KEY_ENV=$API_KEY_ENV_NAME"
+    [[ -n "${API_KEY_ENV_NAME:-}" && -n "${API_KEY:-}" ]] && echo "${API_KEY_ENV_NAME}=$API_KEY"
   } | dotenv_set_many "$ENV_FILE"
-  echo "Wrote provider settings -> $ENV_FILE"
 }
 
 if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
@@ -1107,55 +1106,60 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
     echo "Эндпоинт (base_url) и ключ - общие; модель задаётся отдельно для каждого агента конвейера."
     echo "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
     echo "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
-    echo "Значения по умолчанию — плейсхолдеры формата, не рекомендация конкретного вендора."
+    echo "Enter — принять значение в скобках (из .env / прошлого запуска)."
     echo ""
   fi
+  declare -A AGENT_MODELS=()
+  API_KEY="${API_KEY:-}"
   if [[ -z "$BASE_URL" ]]; then
     BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
     [[ -n "$BASE_URL" ]] || BASE_URL="$INSTALL_PROVIDER_BASE_URL"
-    if [[ -n "$BASE_URL" ]]; then
-      echo "OK  base_url (.env/state): $BASE_URL"
-    else
-      BASE_URL="https://api.openai.com/v1"
-      hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
-      hint "Пример формата: https://api.example.com/v1"
-      BASE_URL="$(read_default "URL эндпоинта (base_url)" "$BASE_URL")"
-    fi
+    [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
+    hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
+    hint "Пример формата: https://api.example.com/v1"
+    BASE_URL="$(read_default "URL эндпоинта (base_url)" "$BASE_URL")"
   fi
-  INSTALL_PROVIDER_BASE_URL="$BASE_URL"
-  save_install_state
+  save_provider_progress
   PASTED_API_KEY=""
   if [[ -z "$API_KEY_ENV_NAME" ]]; then
     API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
     [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="$INSTALL_PROVIDER_API_KEY_ENV"
-    if [[ -n "$API_KEY_ENV_NAME" ]]; then
-      echo "OK  API key env (.env/state): $API_KEY_ENV_NAME"
-    else
+    [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="OPENAI_API_KEY"
+    hint ""
+    hint "Имя переменной окружения для API-ключа (не сам ключ)."
+    hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
+    hint "kbshff читает секрет из env с этим именем."
+    RAW_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+    if looks_like_api_key "$RAW_ENV_NAME"; then
+      echo "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY." >&2
+      PASTED_API_KEY="$RAW_ENV_NAME"
       API_KEY_ENV_NAME="OPENAI_API_KEY"
-      hint ""
-      hint "Имя переменной окружения для API-ключа (не сам ключ)."
-      hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
-      hint "kbshff читает секрет из env с этим именем."
-      RAW_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
-      if looks_like_api_key "$RAW_ENV_NAME"; then
-        echo "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY." >&2
-        PASTED_API_KEY="$RAW_ENV_NAME"
-        API_KEY_ENV_NAME="OPENAI_API_KEY"
-        API_KEY_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
-      else
-        API_KEY_ENV_NAME="$RAW_ENV_NAME"
-      fi
+      API_KEY_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+    else
+      API_KEY_ENV_NAME="$RAW_ENV_NAME"
     fi
     if ! valid_env_var_name "$API_KEY_ENV_NAME"; then
       echo "Invalid API key env var name '$API_KEY_ENV_NAME'. Use something like OPENAI_API_KEY." >&2
       exit 1
     fi
   fi
+  save_provider_progress
   API_KEY="$PASTED_API_KEY"
   if [[ -z "$API_KEY" ]]; then
     API_KEY="$(env_or_file "$API_KEY_ENV_NAME" "$ENV_FILE")"
   fi
   if [[ -z "$API_KEY" ]]; then
+    API_KEY="${!API_KEY_ENV_NAME-}"
+  fi
+  if [[ -n "$API_KEY" && -z "$PASTED_API_KEY" && "$NON_INTERACTIVE" -eq 0 ]]; then
+    hint ""
+    hint "Ключ для ${API_KEY_ENV_NAME} уже есть в .env/окружении."
+    hint "Enter (пустой ввод) — оставить сохранённый; либо вставьте новый (ввод скрыт)."
+    replacement="$(read_secret "Значение API-ключа (${API_KEY_ENV_NAME}, Enter = оставить)")"
+    if [[ -n "$replacement" ]]; then
+      API_KEY="$replacement"
+    fi
+  elif [[ -z "$API_KEY" ]]; then
     hint ""
     hint "Значение ключа для переменной ${API_KEY_ENV_NAME}."
     hint "Ввод скрыт (символы не видны). Вставьте ключ и нажмите Enter."
@@ -1166,14 +1170,13 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
       echo "Пустой ввод (попытка $attempt/3). Вставьте ключ ещё раз — символы не отображаются." >&2
       attempt=$((attempt + 1))
     done
-  else
-    echo "OK  API key (.env/env): $API_KEY_ENV_NAME"
   fi
   if [[ -z "$API_KEY" ]]; then
     echo "API key for $API_KEY_ENV_NAME is required" >&2
     exit 1
   fi
   export "$API_KEY_ENV_NAME=$API_KEY"
+  save_provider_progress
 
   if [[ -z "$MODEL" ]]; then
     MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
@@ -1181,14 +1184,15 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
   [[ -n "$MODEL" ]] || MODEL="$INSTALL_PROVIDER_MODEL"
   [[ -n "$MODEL" ]] || MODEL="gpt-4o"
 
-  declare -A AGENT_MODELS=()
   declare -A CLI_MODELS=(
     ["1c-analyst"]="$MODEL_ANALYST"
     ["1c-yaxunit"]="$MODEL_YAXUNIT"
     ["1c-coder"]="$MODEL_CODER"
     ["1c-implementer"]="$MODEL_IMPLEMENTER"
   )
-  have_all_models=1
+  hint ""
+  hint "model — id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
+  hint "Плейсхолдер формата: gpt-4o (Enter — принять значение в скобках)."
   for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
     env_name="$(agent_model_env_name "$agent")"
     chosen="${CLI_MODELS[$agent]}"
@@ -1200,28 +1204,20 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
     fi
     if [[ -z "$chosen" ]]; then
       chosen="$MODEL"
-      have_all_models=0
+    fi
+    chosen="$(read_default "Модель для $agent" "$chosen")"
+    if [[ -z "$chosen" ]]; then
+      echo "model for $agent is required" >&2
+      exit 1
     fi
     AGENT_MODELS["$agent"]="$chosen"
+    save_provider_progress
   done
-  if [[ "$have_all_models" -eq 1 ]]; then
-    for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
-      echo "OK  model $agent: ${AGENT_MODELS[$agent]}"
-    done
-  else
-    hint ""
-    hint "model — id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
-    hint "Плейсхолдер формата: gpt-4o (Enter — принять значение в скобках)."
-    for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
-      chosen="$(read_default "Модель для $agent" "${AGENT_MODELS[$agent]}")"
-      if [[ -z "$chosen" ]]; then
-        echo "model for $agent is required" >&2
-        exit 1
-      fi
-      AGENT_MODELS["$agent"]="$chosen"
-    done
+  if [[ -z "$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")" ]]; then
+    MODEL="${AGENT_MODELS[1c-analyst]}"
   fi
   save_provider_progress
+  echo "Wrote provider settings -> $ENV_FILE"
   complete_step provider
 fi
 
