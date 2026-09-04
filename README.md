@@ -69,7 +69,7 @@ Windows: не меняйте ExecutionPolicy машины. Запускайте 
 
 ```powershell
 .\scripts\install.cmd
-# флаги: -SkipIngest -NonInteractive -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin" -OscriptVersion stable
+# флаги: -SkipIngest -NonInteractive -Fresh -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin" -OscriptVersion stable
 .\harness\run.cmd -DryRun
 .\harness\run.cmd
 ```
@@ -77,11 +77,13 @@ Windows: не меняйте ExecutionPolicy машины. Запускайте 
 ```bash
 chmod +x scripts/install.sh
 ./scripts/install.sh
-# --skip-ingest --non-interactive --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin --oscript-version stable
+# --skip-ingest --non-interactive --fresh --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin --oscript-version stable
 oscript -encoding=utf-8 harness/run.os --dry-run
 # канон оркестратора без обёртки; install.sh уже гоняет это в конце
 ./harness/run.sh
 ```
+
+Повторный запуск install продолжит с checkpoint (`.install-state.json`); `-Fresh` / `--fresh` — с нуля.
 
 `run.cmd` / `run.sh` — live-eval gate `cfe-qty-check-01` (нужен ключ из `.env`). Весь банк: `-All` / `--all`. Канон без обёртки: `oscript -encoding=utf-8 harness/run.os`.
 

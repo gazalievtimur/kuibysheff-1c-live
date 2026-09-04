@@ -16,6 +16,7 @@ live-run.log
 .kuibysheff/
 
 # Bootstrap artifacts from scripts/install.ps1 / install.sh
+.install-state.json
 tools/bsl-indexer.exe
 tools/bsl-indexer
 tools/code-index/

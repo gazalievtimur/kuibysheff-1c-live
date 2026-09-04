@@ -16,11 +16,16 @@ param(
     [string]$ModelImplementer = "",
     [string]$ApiKeyEnvName = "",
     [string]$PlatformPath = "",
-    [string]$OscriptVersion = "stable"
+    [string]$OscriptVersion = "stable",
+    # Last known-good upstream rev with src/sntx_sem/config.py (main deleted it in c1fe5fed).
+    [string]$SntxSemGitRef = "c2468bcdef581784d714dae9ee45608cf8f100b3",
+    [switch]$Fresh
 )
 
 # Per-agent models (shared base_url / api_key). Populated by Read-ProviderSettings.
 $script:AgentModels = @{}
+$script:InstallState = $null
+$script:InstallStatePath = ""
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -35,8 +40,111 @@ else {
 if (-not $ToolsDir) {
     $ToolsDir = Join-Path $RepoRoot "tools"
 }
+$script:InstallStatePath = Join-Path $RepoRoot ".install-state.json"
 
 $GithubHeaders = @{ "User-Agent" = "kuibysheff-1c-live-install" }
+
+function New-InstallStateObject {
+    return @{
+        version       = 1
+        completed     = New-Object System.Collections.ArrayList
+        platform_path = ""
+        updated_at    = ""
+    }
+}
+
+function Save-InstallState {
+    $script:InstallState.updated_at = (Get-Date).ToString("o")
+    $payload = @{
+        version       = 1
+        completed     = @($script:InstallState.completed)
+        platform_path = [string]$script:InstallState.platform_path
+        updated_at    = [string]$script:InstallState.updated_at
+    }
+    $json = $payload | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText($script:InstallStatePath, $json + "`n", (New-Object System.Text.UTF8Encoding $false))
+}
+
+function Import-InstallState {
+    $script:InstallState = New-InstallStateObject
+    if (-not (Test-Path -LiteralPath $script:InstallStatePath -PathType Leaf)) {
+        return
+    }
+    try {
+        $raw = Get-Content -LiteralPath $script:InstallStatePath -Raw -Encoding UTF8
+        $obj = $raw | ConvertFrom-Json
+        if ($obj.completed) {
+            foreach ($step in @($obj.completed)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$step)) {
+                    [void]$script:InstallState.completed.Add([string]$step)
+                }
+            }
+        }
+        if ($obj.platform_path) {
+            $script:InstallState.platform_path = [string]$obj.platform_path
+        }
+        if ($obj.updated_at) {
+            $script:InstallState.updated_at = [string]$obj.updated_at
+        }
+    }
+    catch {
+        Write-Warning "Ignoring corrupt .install-state.json: $_"
+        $script:InstallState = New-InstallStateObject
+    }
+}
+
+function Clear-InstallState {
+    $script:InstallState = New-InstallStateObject
+    if (Test-Path -LiteralPath $script:InstallStatePath -PathType Leaf) {
+        Remove-Item -LiteralPath $script:InstallStatePath -Force
+    }
+}
+
+function Test-InstallStepDone([string]$Name) {
+    return $script:InstallState.completed -contains $Name
+}
+
+function Complete-InstallStep([string]$Name) {
+    if (-not (Test-InstallStepDone $Name)) {
+        [void]$script:InstallState.completed.Add($Name)
+        Save-InstallState
+    }
+}
+
+function Get-InstallResumeHint {
+    if ($script:InstallState.completed.Count -eq 0) {
+        return ""
+    }
+    return [string]$script:InstallState.completed[$script:InstallState.completed.Count - 1]
+}
+
+function Initialize-InstallResume {
+    if ($Fresh) {
+        Write-Host "Fresh install: clearing .install-state.json"
+        Clear-InstallState
+        return
+    }
+    Import-InstallState
+    if ($script:InstallState.completed.Count -eq 0) {
+        return
+    }
+    $last = Get-InstallResumeHint
+    Write-Host ""
+    Write-Host "Найдено незавершённое install (checkpoint: $last)." -ForegroundColor Yellow
+    Write-Host "Состояние: $script:InstallStatePath" -ForegroundColor Yellow
+    if ($NonInteractive) {
+        Write-Host "NonInteractive: продолжаем с сохранённого места."
+        return
+    }
+    $ans = Read-Prompt "Подтверждение: продолжить с сохранённого места? [Y/n]"
+    if ($ans -match '^(?i)(n|no|н|нет)$') {
+        Write-Host "Starting from the beginning."
+        Clear-InstallState
+    }
+    else {
+        Write-Host "Resuming install..."
+    }
+}
 
 function Write-Step([string]$Message) {
     Write-Host "==> $Message"
@@ -732,6 +840,45 @@ function Select-PlatformBinForIngest {
     return ""
 }
 
+function Ensure-SntxSemGitCheckout([string]$Src) {
+    $configPy = Join-Path $Src "src\sntx_sem\config.py"
+    $ref = $SntxSemGitRef
+    $fromEnv = [Environment]::GetEnvironmentVariable("SNTX_SEM_GIT_REF", "Process")
+    if (-not [string]::IsNullOrWhiteSpace($fromEnv)) {
+        $ref = $fromEnv
+    }
+    if (Test-Path -LiteralPath $configPy -PathType Leaf) {
+        return
+    }
+    if (-not (Test-Command "git")) {
+        throw "1c-sntx-sem is missing src/sntx_sem/config.py (broken upstream tip) and git is unavailable to checkout $ref"
+    }
+    Write-Warning "1c-sntx-sem missing src/sntx_sem/config.py (upstream main is broken). Checking out $ref"
+    $gitDir = Join-Path $Src ".git"
+    if (-not (Test-Path -LiteralPath $gitDir)) {
+        throw "Cannot repair 1c-sntx-sem at $Src (not a git checkout). Delete it and re-run install."
+    }
+    Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Src, "fetch", "--depth", "1", "origin", $ref) -FailMessage "git fetch 1c-sntx-sem $ref failed"
+    Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Src, "checkout", "--force", "FETCH_HEAD") -FailMessage "git checkout 1c-sntx-sem $ref failed"
+    if (-not (Test-Path -LiteralPath $configPy -PathType Leaf)) {
+        throw "1c-sntx-sem still missing config.py after checkout $ref"
+    }
+}
+
+function Clone-SntxSem([string]$Dest) {
+    $ref = $SntxSemGitRef
+    $fromEnv = [Environment]::GetEnvironmentVariable("SNTX_SEM_GIT_REF", "Process")
+    if (-not [string]::IsNullOrWhiteSpace($fromEnv)) {
+        $ref = $fromEnv
+    }
+    Write-Host "Cloning 1c-sntx-sem @$ref -> $Dest"
+    New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+    Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Dest, "init") -FailMessage "git init 1c-sntx-sem failed"
+    Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Dest, "remote", "add", "origin", "https://github.com/gybson63/1c-sntx-sem.git") -FailMessage "git remote add 1c-sntx-sem failed"
+    Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Dest, "fetch", "--depth", "1", "origin", $ref) -FailMessage "git fetch 1c-sntx-sem $ref failed"
+    Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Dest, "checkout", "FETCH_HEAD") -FailMessage "git checkout 1c-sntx-sem failed"
+}
+
 function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
     Write-Step "1c-sntx-sem"
     $existing = Get-EnvOrMap $EnvMap "SNTX_SEM_CONFIG"
@@ -748,44 +895,83 @@ function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
             }
         }
     }
-    if (-not $src) {
-        if (-not (Test-Command "git")) {
-            throw "git not found (needed to clone 1c-sntx-sem). https://github.com/gybson63/1c-sntx-sem"
+    $venvPy = ""
+    $config = ""
+    if ($src) {
+        $venvPy = Join-Path $src ".venv\Scripts\python.exe"
+        $config = Join-Path $src "config.yaml"
+    }
+    $setupOk = (Test-InstallStepDone "sntx_setup") -and $src -and (Test-Path -LiteralPath $venvPy -PathType Leaf) -and (Test-Path -LiteralPath $config -PathType Leaf)
+    if ($setupOk) {
+        Write-Host "OK  1c-sntx-sem setup (skipped, checkpoint)"
+    }
+    else {
+        if (-not $src) {
+            if (-not (Test-Command "git")) {
+                throw "git not found (needed to clone 1c-sntx-sem). https://github.com/gybson63/1c-sntx-sem"
+            }
+            $src = Join-Path $ToolsDir "1c-sntx-sem"
+            Clone-SntxSem $src
         }
-        $src = Join-Path $ToolsDir "1c-sntx-sem"
-        Write-Host "Cloning 1c-sntx-sem -> $src"
-        Invoke-NativeProcess -FilePath "git" -ArgumentList @("clone", "--depth", "1", "https://github.com/gybson63/1c-sntx-sem.git", $src) -FailMessage "git clone 1c-sntx-sem failed"
-    }
-    $venvPy = Join-Path $src ".venv\Scripts\python.exe"
-    if (-not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
-        Invoke-Python -PythonCmd $PythonCmd -PythonArgs @("-m", "venv", ".venv") -WorkDir $src
-    }
-    Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-U", "pip")
-    Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-e", ".") -WorkDir $src
-    $config = Join-Path $src "config.yaml"
-    if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
-        $example = Join-Path $src "config.yaml.example"
-        if (-not (Test-Path -LiteralPath $example -PathType Leaf)) {
-            throw "missing $example"
+        Ensure-SntxSemGitCheckout $src
+        $venvPy = Join-Path $src ".venv\Scripts\python.exe"
+        if (-not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
+            Invoke-Python -PythonCmd $PythonCmd -PythonArgs @("-m", "venv", ".venv") -WorkDir $src
         }
-        Copy-Item -LiteralPath $example -Destination $config
-        Write-Host "Created $config from example. Edit local_configs / ingest as needed."
+        Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-U", "pip")
+        Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-e", ".") -WorkDir $src
+        try {
+            Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-c", "from sntx_sem.config import load_config") -WorkDir $src
+        }
+        catch {
+            throw "1c-sntx-sem import check failed (from sntx_sem.config import load_config). Pin SNTX_SEM_GIT_REF / -SntxSemGitRef to a revision that still has config.py. $_"
+        }
+        $config = Join-Path $src "config.yaml"
+        if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
+            $example = Join-Path $src "config.yaml.example"
+            if (-not (Test-Path -LiteralPath $example -PathType Leaf)) {
+                throw "missing $example"
+            }
+            Copy-Item -LiteralPath $example -Destination $config
+            Write-Host "Created $config from example. Edit local_configs / ingest as needed."
+        }
+        Complete-InstallStep "sntx_setup"
     }
-    $doIngest = -not $SkipIngest
+    $doIngest = -not $SkipIngest -and -not (Test-InstallStepDone "ingest")
     $chosenPlatform = $PlatformPath
+    if (-not $chosenPlatform -and $script:InstallState.platform_path) {
+        $chosenPlatform = [string]$script:InstallState.platform_path
+    }
     if ($doIngest) {
         if (-not $chosenPlatform) {
             $chosenPlatform = Select-PlatformBinForIngest
         }
+        if (-not [string]::IsNullOrWhiteSpace($chosenPlatform)) {
+            $script:InstallState.platform_path = $chosenPlatform
+            Save-InstallState
+        }
         if ([string]::IsNullOrWhiteSpace($chosenPlatform)) {
             Write-Warning "Skipping ingest: no platform path. sntx_sem search will not work until you run: $venvPy -m sntx_sem ingest --platform-path PLATFORM_BIN"
+            Complete-InstallStep "ingest"
         }
         else {
-            Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "sntx_sem", "ingest", "--platform-path", $chosenPlatform) -WorkDir $src
+            try {
+                Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "sntx_sem", "ingest", "--platform-path", $chosenPlatform) -WorkDir $src
+                Complete-InstallStep "ingest"
+            }
+            catch {
+                Write-Warning "sntx_sem ingest failed (install continues without platform help index): $_"
+                Write-Warning "Re-run later: `"$venvPy`" -m sntx_sem ingest --platform-path `"$chosenPlatform`""
+                Write-Warning "Or re-run install.cmd to resume from ingest after fixing 1c-sntx-sem."
+            }
         }
+    }
+    elseif (Test-InstallStepDone "ingest") {
+        Write-Host "OK  sntx_sem ingest (skipped, checkpoint)"
     }
     else {
         Write-Warning "Skipping ingest. Set SNTX_SEM_CONFIG and run ingest before a live eval."
+        Complete-InstallStep "ingest"
     }
     return @{
         Config = (Resolve-Path $config).Path
@@ -877,16 +1063,56 @@ function Install-ConveyorProfiles([string]$Kbshff, [string]$ProjectRoot, [string
     $i = 0
     foreach ($agent in $agents) {
         $i++
+        $stepName = "profile:$($agent.Id)"
+        if (Test-InstallStepDone $stepName) {
+            Write-Host "OK  $stepName (skipped, checkpoint)"
+            continue
+        }
         $model = [string]$ProvModels[$agent.Id]
         if ([string]::IsNullOrWhiteSpace($model)) {
             throw "model for agent $($agent.Id) is empty"
         }
         Invoke-KbshffProvider $Kbshff $ProjectRoot $agent.Id $agent.Skills $ProvBaseUrl $model $ProvKeyEnv "[$i/$total]"
+        Complete-InstallStep $stepName
     }
+    Complete-InstallStep "profiles"
 }
 
 function Read-ProviderSettings([hashtable]$EnvMap) {
     Write-Step "AI provider"
+    if (Test-InstallStepDone "provider") {
+        if (-not $script:BaseUrl) {
+            $script:BaseUrl = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_BASE_URL"
+        }
+        if (-not $script:ApiKeyEnvName) {
+            $script:ApiKeyEnvName = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_API_KEY_ENV"
+        }
+        if (-not $script:ApiKeyEnvName) { $script:ApiKeyEnvName = "OPENAI_API_KEY" }
+        if (-not $script:BaseUrl) { $script:BaseUrl = "https://api.openai.com/v1" }
+        $apiKey = Get-EnvOrMap $EnvMap $script:ApiKeyEnvName
+        if (-not $apiKey) {
+            $apiKey = [Environment]::GetEnvironmentVariable($script:ApiKeyEnvName, "Process")
+        }
+        if ([string]::IsNullOrWhiteSpace($apiKey)) {
+            Write-Warning "Checkpoint 'provider' set, but API key for $($script:ApiKeyEnvName) missing - asking again."
+        }
+        else {
+            $defaultModel = $script:Model
+            if (-not $defaultModel) { $defaultModel = Get-EnvOrMap $EnvMap "KBSHFF_PROVIDER_MODEL" }
+            if (-not $defaultModel) { $defaultModel = "gpt-4o" }
+            $script:Model = $defaultModel
+            $script:AgentModels = @{}
+            foreach ($agent in (Get-ConveyorAgents)) {
+                $envName = Get-AgentModelEnvName $agent.Id
+                $chosen = Get-EnvOrMap $EnvMap $envName
+                if (-not $chosen) { $chosen = $defaultModel }
+                $script:AgentModels[$agent.Id] = $chosen
+            }
+            [Environment]::SetEnvironmentVariable($script:ApiKeyEnvName, $apiKey, "Process")
+            Write-Host "OK  AI provider (skipped, checkpoint)"
+            return $apiKey
+        }
+    }
     if (-not $NonInteractive) {
         Write-Host ""
         Write-Host "Нужен любой OpenAI-compatible HTTP API (Chat Completions)."
@@ -983,10 +1209,13 @@ function Read-ProviderSettings([hashtable]$EnvMap) {
         }
         $script:AgentModels[$agent.Id] = $chosen
     }
+    Complete-InstallStep "provider"
     return $apiKey
 }
 
 # --- main ---
+
+Initialize-InstallResume
 
 New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
 
@@ -1020,7 +1249,13 @@ if (-not $SkipIngest -and -not $PlatformPath) {
         Write-Host "OK  1C platform bin (found $($platformBins.Count))"
     }
 }
-Confirm-OptionalHostGaps @($optionalGaps)
+if (-not (Test-InstallStepDone "host_tools")) {
+    Confirm-OptionalHostGaps @($optionalGaps)
+    Complete-InstallStep "host_tools"
+}
+else {
+    Write-Host "OK  host tools (skipped optional confirm, checkpoint)"
+}
 
 $envPath = Join-Path $RepoRoot ".env"
 $envMap = Read-DotEnv $envPath
@@ -1028,7 +1263,9 @@ $envMap = Read-DotEnv $envPath
 $apiKey = Read-ProviderSettings $envMap
 
 $kbshff = Ensure-Kbshff $envMap
+Complete-InstallStep "kbshff"
 $indexer = Ensure-BslIndexer $envMap
+Complete-InstallStep "indexer"
 $mcpJs = Ensure-BslLsMcp $envMap
 $jar = ""
 if ($mcpJs) {
@@ -1040,6 +1277,7 @@ elseif (Get-EnvOrMap $envMap "BSL_LS_JAR") {
 else {
     Write-Host "Skipping BSL LS JAR (no bsl-ls-mcp path). Set BSL_LS_MCP / install Node, or use your own MCP."
 }
+Complete-InstallStep "bsl"
 $sntx = Ensure-SntxSem $envMap $pythonCmd
 $javaHome = ""
 if ($jar -or $mcpJs) {
@@ -1079,13 +1317,28 @@ foreach ($name in $exportNames) {
 if ($mcpJs) { [Environment]::SetEnvironmentVariable("BSL_LS_MCP", $mcpJs, "Process") }
 if ($jar) { [Environment]::SetEnvironmentVariable("BSL_LS_JAR", $jar, "Process") }
 
-Save-DotEnv $envPath $envMap
-Write-Host "Wrote $envPath"
+if (-not (Test-InstallStepDone "env")) {
+    Save-DotEnv $envPath $envMap
+    Write-Host "Wrote $envPath"
+    Complete-InstallStep "env"
+}
+else {
+    Save-DotEnv $envPath $envMap
+    Write-Host "OK  .env (refreshed, checkpoint)"
+}
 
 Install-ConveyorProfiles $kbshff $RepoRoot $BaseUrl $script:AgentModels $ApiKeyEnvName
 
 Write-Step "harness dry-run"
-Invoke-NativeProcess -FilePath $oscriptBin -ArgumentList @("-encoding=utf-8", (Join-Path $RepoRoot "harness\run.os"), "--repo-root", $RepoRoot, "--dry-run") -FailMessage "dry-run failed"
+if (-not (Test-InstallStepDone "dry_run")) {
+    Invoke-NativeProcess -FilePath $oscriptBin -ArgumentList @("-encoding=utf-8", (Join-Path $RepoRoot "harness\run.os"), "--repo-root", $RepoRoot, "--dry-run") -FailMessage "dry-run failed"
+    Complete-InstallStep "dry_run"
+}
+else {
+    Write-Host "OK  harness dry-run (skipped, checkpoint)"
+}
+
+Clear-InstallState
 
 Write-Host ""
 Write-Host "Install OK. Conveyor is ready."

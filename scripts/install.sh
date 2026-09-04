@@ -15,15 +15,18 @@ MODEL_IMPLEMENTER=""
 API_KEY_ENV_NAME=""
 PLATFORM_PATH=""
 OSCRIPT_VERSION="stable"
+# Last known-good upstream rev with src/sntx_sem/config.py (main deleted it in c1fe5fed).
+SNTX_SEM_GIT_REF="${SNTX_SEM_GIT_REF:-c2468bcdef581784d714dae9ee45608cf8f100b3}"
+FRESH=0
 
 usage() {
   cat <<'EOF'
 Usage: scripts/install.sh [--repo-root DIR] [--tools-dir DIR] [--skip-ingest]
-                          [--non-interactive] [--base-url URL] [--model NAME]
+                          [--non-interactive] [--fresh] [--base-url URL] [--model NAME]
                           [--model-analyst NAME] [--model-yaxunit NAME]
                           [--model-coder NAME] [--model-implementer NAME]
                           [--api-key-env NAME] [--platform-path DIR]
-                          [--oscript-version VERSION]
+                          [--oscript-version VERSION] [--sntx-sem-git-ref REF]
 EOF
 }
 
@@ -33,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --tools-dir) TOOLS_DIR="$2"; shift 2 ;;
     --skip-ingest) SKIP_INGEST=1; shift ;;
     --non-interactive) NON_INTERACTIVE=1; shift ;;
+    --fresh) FRESH=1; shift ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     --model-analyst) MODEL_ANALYST="$2"; shift 2 ;;
@@ -42,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --api-key-env) API_KEY_ENV_NAME="$2"; shift 2 ;;
     --platform-path) PLATFORM_PATH="$2"; shift 2 ;;
     --oscript-version) OSCRIPT_VERSION="$2"; shift 2 ;;
+    --sntx-sem-git-ref) SNTX_SEM_GIT_REF="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -56,6 +61,9 @@ fi
 if [[ -z "$TOOLS_DIR" ]]; then
   TOOLS_DIR="$REPO_ROOT/tools"
 fi
+INSTALL_STATE_PATH="$REPO_ROOT/.install-state.json"
+INSTALL_COMPLETED=()
+INSTALL_PLATFORM_PATH=""
 
 step() { echo "==> $*"; }
 hint() {
@@ -72,6 +80,100 @@ write_input_label() {
   printf '\033[46;30m[ВВОД]\033[0m \033[36m%s\033[0m: ' "$prompt"
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+save_install_state() {
+  COMPLETED_LINES="$(printf '%s\n' "${INSTALL_COMPLETED[@]+"${INSTALL_COMPLETED[@]}"}")" \
+  PLATFORM_PATH_STATE="$INSTALL_PLATFORM_PATH" \
+  python3 - "$INSTALL_STATE_PATH" <<'PY'
+import datetime, json, os, sys
+path = sys.argv[1]
+steps = [s for s in os.environ.get("COMPLETED_LINES", "").splitlines() if s.strip()]
+payload = {
+    "version": 1,
+    "completed": steps,
+    "platform_path": os.environ.get("PLATFORM_PATH_STATE", ""),
+    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+}
+with open(path, "w", encoding="utf-8") as f:
+    f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+PY
+}
+
+import_install_state() {
+  INSTALL_COMPLETED=()
+  INSTALL_PLATFORM_PATH=""
+  [[ -f "$INSTALL_STATE_PATH" ]] || return 0
+  eval "$(python3 - "$INSTALL_STATE_PATH" <<'PY'
+import json, shlex, sys
+path = sys.argv[1]
+try:
+    obj = json.load(open(path, encoding="utf-8"))
+except Exception as exc:
+    print(f'echo "Ignoring corrupt .install-state.json: {exc}" >&2')
+    sys.exit(0)
+platform = obj.get("platform_path") or ""
+print(f"INSTALL_PLATFORM_PATH={shlex.quote(str(platform))}")
+for step in obj.get("completed") or []:
+    s = str(step).strip()
+    if s:
+        print(f"INSTALL_COMPLETED+=({shlex.quote(s)})")
+PY
+)"
+}
+
+clear_install_state() {
+  INSTALL_COMPLETED=()
+  INSTALL_PLATFORM_PATH=""
+  rm -f "$INSTALL_STATE_PATH"
+}
+
+step_done() {
+  local name="$1" s
+  for s in "${INSTALL_COMPLETED[@]+"${INSTALL_COMPLETED[@]}"}"; do
+    [[ "$s" == "$name" ]] && return 0
+  done
+  return 1
+}
+
+complete_step() {
+  local name="$1"
+  if ! step_done "$name"; then
+    INSTALL_COMPLETED+=("$name")
+  fi
+  save_install_state
+}
+
+initialize_install_resume() {
+  if [[ "$FRESH" -eq 1 ]]; then
+    echo "Fresh install: clearing .install-state.json"
+    clear_install_state
+    return
+  fi
+  import_install_state
+  if [[ "${#INSTALL_COMPLETED[@]}" -eq 0 ]]; then
+    return
+  fi
+  local last="${INSTALL_COMPLETED[$((${#INSTALL_COMPLETED[@]} - 1))]}"
+  echo ""
+  printf '\033[33mНайдено незавершённое install (checkpoint: %s).\033[0m\n' "$last"
+  printf '\033[33mСостояние: %s\033[0m\n' "$INSTALL_STATE_PATH"
+  if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+    echo "NonInteractive: продолжаем с сохранённого места."
+    return
+  fi
+  local ans
+  write_input_label "Подтверждение: продолжить с сохранённого места? [Y/n]"
+  read -r ans || true
+  case "$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')" in
+    n|no|н|нет)
+      echo "Starting from the beginning."
+      clear_install_state
+      ;;
+    *)
+      echo "Resuming install..."
+      ;;
+  esac
+}
 
 require_host() {
   local name="$1" hint_msg="$2"
@@ -647,9 +749,32 @@ select_platform_bin_for_ingest() {
   printf ''
 }
 
+ensure_sntx_git_checkout() {
+  local src="$1" config_py="$1/src/sntx_sem/config.py"
+  if [[ -f "$config_py" ]]; then
+    return
+  fi
+  have git || { echo "1c-sntx-sem missing config.py and git is unavailable to checkout $SNTX_SEM_GIT_REF" >&2; exit 1; }
+  echo "1c-sntx-sem missing src/sntx_sem/config.py (upstream main is broken). Checking out $SNTX_SEM_GIT_REF" >&2
+  [[ -d "$src/.git" ]] || { echo "Cannot repair $src (not a git checkout). Delete it and re-run install." >&2; exit 1; }
+  git -C "$src" fetch --depth 1 origin "$SNTX_SEM_GIT_REF"
+  git -C "$src" checkout --force FETCH_HEAD
+  [[ -f "$config_py" ]] || { echo "1c-sntx-sem still missing config.py after checkout $SNTX_SEM_GIT_REF" >&2; exit 1; }
+}
+
+clone_sntx_sem() {
+  local dest="$1"
+  echo "Cloning 1c-sntx-sem @$SNTX_SEM_GIT_REF -> $dest"
+  mkdir -p "$dest"
+  git -C "$dest" init
+  git -C "$dest" remote add origin https://github.com/gybson63/1c-sntx-sem.git
+  git -C "$dest" fetch --depth 1 origin "$SNTX_SEM_GIT_REF"
+  git -C "$dest" checkout FETCH_HEAD
+}
+
 ensure_sntx() {
   step "1c-sntx-sem"
-  local existing src parent venv_py config chosen
+  local existing src parent venv_py config chosen do_ingest setup_ok
   existing="$(env_or_file SNTX_SEM_CONFIG "$ENV_FILE")"
   src=""
   if [[ -n "$existing" && -f "$existing" ]]; then
@@ -663,38 +788,75 @@ ensure_sntx() {
       fi
     done
   fi
-  if [[ -z "$src" ]]; then
-    have git || { echo "git not found (needed to clone 1c-sntx-sem)" >&2; exit 1; }
-    src="$TOOLS_DIR/1c-sntx-sem"
-    echo "Cloning 1c-sntx-sem -> $src"
-    git clone --depth 1 https://github.com/gybson63/1c-sntx-sem.git "$src"
+  venv_py=""
+  config=""
+  if [[ -n "$src" ]]; then
+    venv_py="$src/.venv/bin/python"
+    config="$src/config.yaml"
   fi
-  venv_py="$src/.venv/bin/python"
-  if [[ ! -x "$venv_py" ]]; then
-    python3 -m venv "$src/.venv"
+  setup_ok=0
+  if step_done sntx_setup && [[ -n "$src" && -x "$venv_py" && -f "$config" ]]; then
+    setup_ok=1
   fi
-  "$venv_py" -m pip install -U pip
-  (cd "$src" && "$venv_py" -m pip install -e .)
-  config="$src/config.yaml"
-  if [[ ! -f "$config" ]]; then
-    [[ -f "$src/config.yaml.example" ]] || { echo "missing config.yaml.example" >&2; exit 1; }
-    cp "$src/config.yaml.example" "$config"
-    echo "Created $config from example — edit local_configs / ingest as needed."
+  if [[ "$setup_ok" -eq 1 ]]; then
+    echo "OK  1c-sntx-sem setup (skipped, checkpoint)"
+  else
+    if [[ -z "$src" ]]; then
+      have git || { echo "git not found (needed to clone 1c-sntx-sem)" >&2; exit 1; }
+      src="$TOOLS_DIR/1c-sntx-sem"
+      clone_sntx_sem "$src"
+    fi
+    ensure_sntx_git_checkout "$src"
+    venv_py="$src/.venv/bin/python"
+    if [[ ! -x "$venv_py" ]]; then
+      python3 -m venv "$src/.venv"
+    fi
+    "$venv_py" -m pip install -U pip
+    (cd "$src" && "$venv_py" -m pip install -e .)
+    if ! (cd "$src" && "$venv_py" -c "from sntx_sem.config import load_config"); then
+      echo "1c-sntx-sem import check failed. Pin --sntx-sem-git-ref / SNTX_SEM_GIT_REF to a revision with config.py." >&2
+      exit 1
+    fi
+    config="$src/config.yaml"
+    if [[ ! -f "$config" ]]; then
+      [[ -f "$src/config.yaml.example" ]] || { echo "missing config.yaml.example" >&2; exit 1; }
+      cp "$src/config.yaml.example" "$config"
+      echo "Created $config from example — edit local_configs / ingest as needed."
+    fi
+    complete_step sntx_setup
   fi
-  local do_ingest=1
+  do_ingest=1
   [[ "$SKIP_INGEST" -eq 1 ]] && do_ingest=0
+  step_done ingest && do_ingest=0
   if [[ "$do_ingest" -eq 1 ]]; then
     chosen="$PLATFORM_PATH"
+    if [[ -z "$chosen" && -n "$INSTALL_PLATFORM_PATH" ]]; then
+      chosen="$INSTALL_PLATFORM_PATH"
+    fi
     if [[ -z "$chosen" ]]; then
       chosen="$(select_platform_bin_for_ingest)"
     fi
+    if [[ -n "$chosen" ]]; then
+      INSTALL_PLATFORM_PATH="$chosen"
+      save_install_state
+    fi
     if [[ -z "$chosen" ]]; then
       echo "Skipping ingest: no platform path." >&2
+      complete_step ingest
     else
-      (cd "$src" && "$venv_py" -m sntx_sem ingest --platform-path "$chosen")
+      if (cd "$src" && "$venv_py" -m sntx_sem ingest --platform-path "$chosen"); then
+        complete_step ingest
+      else
+        echo "sntx_sem ingest failed (install continues without platform help index)." >&2
+        echo "Re-run later: $venv_py -m sntx_sem ingest --platform-path \"$chosen\"" >&2
+        echo "Or re-run install.sh to resume from ingest after fixing 1c-sntx-sem." >&2
+      fi
     fi
+  elif step_done ingest; then
+    echo "OK  sntx_sem ingest (skipped, checkpoint)"
   else
     echo "Skipping ingest. Run ingest before a live eval if the index is empty." >&2
+    complete_step ingest
   fi
   printf '%s\n%s\n' "$config" "$venv_py"
 }
@@ -758,14 +920,39 @@ apply_provider() {
 install_conveyor_profiles() {
   local kbshff="$1" project="$2" base="$3" keyenv="$4"
   step "Conveyor profiles (all skills)"
-  apply_provider "$kbshff" "$project" "1c-analyst" "$base" "${AGENT_MODELS[1c-analyst]}" "$keyenv" "[1/4]" \
-    workspace platform_help conf_docs code_index local_research web_search
-  apply_provider "$kbshff" "$project" "1c-yaxunit" "$base" "${AGENT_MODELS[1c-yaxunit]}" "$keyenv" "[2/4]" \
-    workspace yaxunit_docs platform_help code_index bsl_lint local_research web_search
-  apply_provider "$kbshff" "$project" "1c-coder" "$base" "${AGENT_MODELS[1c-coder]}" "$keyenv" "[3/4]" \
-    workspace platform_help code_index bsl_lint local_research
-  apply_provider "$kbshff" "$project" "1c-implementer" "$base" "${AGENT_MODELS[1c-implementer]}" "$keyenv" "[4/4]" \
-    workspace platform_help code_index local_research bsl_lint
+  local agent i=0
+  local -a agents=(1c-analyst 1c-yaxunit 1c-coder 1c-implementer)
+  local -a skills_analyst=(workspace platform_help conf_docs code_index local_research web_search)
+  local -a skills_yaxunit=(workspace yaxunit_docs platform_help code_index bsl_lint local_research web_search)
+  local -a skills_coder=(workspace platform_help code_index bsl_lint local_research)
+  local -a skills_impl=(workspace platform_help code_index local_research bsl_lint)
+  for agent in "${agents[@]}"; do
+    i=$((i + 1))
+    if step_done "profile:$agent"; then
+      echo "OK  profile:$agent (skipped, checkpoint)"
+      continue
+    fi
+    case "$agent" in
+      1c-analyst)
+        apply_provider "$kbshff" "$project" "$agent" "$base" "${AGENT_MODELS[$agent]}" "$keyenv" "[$i/4]" \
+          "${skills_analyst[@]}"
+        ;;
+      1c-yaxunit)
+        apply_provider "$kbshff" "$project" "$agent" "$base" "${AGENT_MODELS[$agent]}" "$keyenv" "[$i/4]" \
+          "${skills_yaxunit[@]}"
+        ;;
+      1c-coder)
+        apply_provider "$kbshff" "$project" "$agent" "$base" "${AGENT_MODELS[$agent]}" "$keyenv" "[$i/4]" \
+          "${skills_coder[@]}"
+        ;;
+      1c-implementer)
+        apply_provider "$kbshff" "$project" "$agent" "$base" "${AGENT_MODELS[$agent]}" "$keyenv" "[$i/4]" \
+          "${skills_impl[@]}"
+        ;;
+    esac
+    complete_step "profile:$agent"
+  done
+  complete_step profiles
 }
 
 agent_model_env_name() {
@@ -777,6 +964,7 @@ agent_model_env_name() {
 }
 
 ENV_FILE="$REPO_ROOT/.env"
+initialize_install_resume
 mkdir -p "$TOOLS_DIR"
 
 step "Host tools"
@@ -805,103 +993,141 @@ if [[ "$SKIP_INGEST" -eq 0 && -z "$PLATFORM_PATH" ]]; then
     echo "OK  1C platform bin (found ${#_platform_bins[@]})"
   fi
 fi
-confirm_optional_host_gaps "${OPTIONAL_GAPS[@]}"
+if step_done host_tools; then
+  echo "OK  host tools (skipped optional confirm, checkpoint)"
+else
+  confirm_optional_host_gaps "${OPTIONAL_GAPS[@]}"
+  complete_step host_tools
+fi
 
 step "AI provider"
-if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
-  echo ""
-  echo "Нужен любой OpenAI-compatible HTTP API (Chat Completions)."
-  echo "Эндпоинт (base_url) и ключ - общие; модель задаётся отдельно для каждого агента конвейера."
-  echo "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
-  echo "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
-  echo "Значения по умолчанию — плейсхолдеры формата, не рекомендация конкретного вендора."
-  echo ""
-fi
-if [[ -z "$BASE_URL" ]]; then
-  BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
+PROVIDER_FROM_CHECKPOINT=0
+if step_done provider; then
+  [[ -n "$BASE_URL" ]] || BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
   [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
-  hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
-  hint "Пример формата: https://api.example.com/v1"
-  BASE_URL="$(read_default "URL эндпоинта (base_url)" "$BASE_URL")"
-fi
-PASTED_API_KEY=""
-if [[ -z "$API_KEY_ENV_NAME" ]]; then
-  API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
+  [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
   [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="OPENAI_API_KEY"
-  hint ""
-  hint "Имя переменной окружения для API-ключа (не сам ключ)."
-  hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
-  hint "kbshff читает секрет из env с этим именем."
-  RAW_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
-  if looks_like_api_key "$RAW_ENV_NAME"; then
-    echo "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY." >&2
-    PASTED_API_KEY="$RAW_ENV_NAME"
-    API_KEY_ENV_NAME="OPENAI_API_KEY"
-    API_KEY_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
-  else
-    API_KEY_ENV_NAME="$RAW_ENV_NAME"
-  fi
-  if ! valid_env_var_name "$API_KEY_ENV_NAME"; then
-    echo "Invalid API key env var name '$API_KEY_ENV_NAME'. Use something like OPENAI_API_KEY." >&2
-    exit 1
-  fi
-fi
-API_KEY="$PASTED_API_KEY"
-if [[ -z "$API_KEY" ]]; then
   API_KEY="$(env_or_file "$API_KEY_ENV_NAME" "$ENV_FILE")"
-fi
-if [[ -z "$API_KEY" ]]; then
-  hint ""
-  hint "Значение ключа для переменной ${API_KEY_ENV_NAME}."
-  hint "Ввод скрыт (символы не видны). Вставьте ключ и нажмите Enter."
-  attempt=1
-  while [[ $attempt -le 3 ]]; do
-    API_KEY="$(read_secret "Значение API-ключа (${API_KEY_ENV_NAME})")"
-    [[ -n "$API_KEY" ]] && break
-    echo "Пустой ввод (попытка $attempt/3). Вставьте ключ ещё раз — символы не отображаются." >&2
-    attempt=$((attempt + 1))
-  done
-fi
-if [[ -z "$API_KEY" ]]; then
-  echo "API key for $API_KEY_ENV_NAME is required" >&2
-  exit 1
-fi
-export "$API_KEY_ENV_NAME=$API_KEY"
-
-if [[ -z "$MODEL" ]]; then
-  MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
-fi
-[[ -n "$MODEL" ]] || MODEL="gpt-4o"
-
-declare -A AGENT_MODELS=()
-declare -A CLI_MODELS=(
-  ["1c-analyst"]="$MODEL_ANALYST"
-  ["1c-yaxunit"]="$MODEL_YAXUNIT"
-  ["1c-coder"]="$MODEL_CODER"
-  ["1c-implementer"]="$MODEL_IMPLEMENTER"
-)
-hint ""
-hint "model — id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
-hint "Плейсхолдер формата: gpt-4o (Enter — принять значение в скобках)."
-for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
-  env_name="$(agent_model_env_name "$agent")"
-  chosen="${CLI_MODELS[$agent]}"
-  if [[ -z "$chosen" ]]; then
-    chosen="$(env_or_file "$env_name" "$ENV_FILE")"
+  if [[ -z "$API_KEY" ]]; then
+    API_KEY="${!API_KEY_ENV_NAME-}"
   fi
-  if [[ -z "$chosen" ]]; then
-    chosen="$MODEL"
+  if [[ -n "$API_KEY" ]]; then
+    [[ -n "$MODEL" ]] || MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
+    [[ -n "$MODEL" ]] || MODEL="gpt-4o"
+    declare -A AGENT_MODELS=()
+    for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
+      env_name="$(agent_model_env_name "$agent")"
+      chosen="$(env_or_file "$env_name" "$ENV_FILE")"
+      [[ -n "$chosen" ]] || chosen="$MODEL"
+      AGENT_MODELS["$agent"]="$chosen"
+    done
+    export "$API_KEY_ENV_NAME=$API_KEY"
+    echo "OK  AI provider (skipped, checkpoint)"
+    PROVIDER_FROM_CHECKPOINT=1
+  else
+    echo "Checkpoint 'provider' set, but API key for $API_KEY_ENV_NAME missing - asking again." >&2
   fi
-  chosen="$(read_default "Модель для $agent" "$chosen")"
-  if [[ -z "$chosen" ]]; then
-    echo "model for $agent is required" >&2
+fi
+
+if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
+  if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
+    echo ""
+    echo "Нужен любой OpenAI-compatible HTTP API (Chat Completions)."
+    echo "Эндпоинт (base_url) и ключ - общие; модель задаётся отдельно для каждого агента конвейера."
+    echo "Параметры попадут в kbshff через: config provider set --base-url --model --api-key-env"
+    echo "Сам ключ хранится только в .env / окружении и НЕ передаётся в argv CLI."
+    echo "Значения по умолчанию — плейсхолдеры формата, не рекомендация конкретного вендора."
+    echo ""
+  fi
+  if [[ -z "$BASE_URL" ]]; then
+    BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
+    [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
+    hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
+    hint "Пример формата: https://api.example.com/v1"
+    BASE_URL="$(read_default "URL эндпоинта (base_url)" "$BASE_URL")"
+  fi
+  PASTED_API_KEY=""
+  if [[ -z "$API_KEY_ENV_NAME" ]]; then
+    API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
+    [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="OPENAI_API_KEY"
+    hint ""
+    hint "Имя переменной окружения для API-ключа (не сам ключ)."
+    hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
+    hint "kbshff читает секрет из env с этим именем."
+    RAW_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+    if looks_like_api_key "$RAW_ENV_NAME"; then
+      echo "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY." >&2
+      PASTED_API_KEY="$RAW_ENV_NAME"
+      API_KEY_ENV_NAME="OPENAI_API_KEY"
+      API_KEY_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+    else
+      API_KEY_ENV_NAME="$RAW_ENV_NAME"
+    fi
+    if ! valid_env_var_name "$API_KEY_ENV_NAME"; then
+      echo "Invalid API key env var name '$API_KEY_ENV_NAME'. Use something like OPENAI_API_KEY." >&2
+      exit 1
+    fi
+  fi
+  API_KEY="$PASTED_API_KEY"
+  if [[ -z "$API_KEY" ]]; then
+    API_KEY="$(env_or_file "$API_KEY_ENV_NAME" "$ENV_FILE")"
+  fi
+  if [[ -z "$API_KEY" ]]; then
+    hint ""
+    hint "Значение ключа для переменной ${API_KEY_ENV_NAME}."
+    hint "Ввод скрыт (символы не видны). Вставьте ключ и нажмите Enter."
+    attempt=1
+    while [[ $attempt -le 3 ]]; do
+      API_KEY="$(read_secret "Значение API-ключа (${API_KEY_ENV_NAME})")"
+      [[ -n "$API_KEY" ]] && break
+      echo "Пустой ввод (попытка $attempt/3). Вставьте ключ ещё раз — символы не отображаются." >&2
+      attempt=$((attempt + 1))
+    done
+  fi
+  if [[ -z "$API_KEY" ]]; then
+    echo "API key for $API_KEY_ENV_NAME is required" >&2
     exit 1
   fi
-  AGENT_MODELS["$agent"]="$chosen"
-done
+  export "$API_KEY_ENV_NAME=$API_KEY"
+
+  if [[ -z "$MODEL" ]]; then
+    MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
+  fi
+  [[ -n "$MODEL" ]] || MODEL="gpt-4o"
+
+  declare -A AGENT_MODELS=()
+  declare -A CLI_MODELS=(
+    ["1c-analyst"]="$MODEL_ANALYST"
+    ["1c-yaxunit"]="$MODEL_YAXUNIT"
+    ["1c-coder"]="$MODEL_CODER"
+    ["1c-implementer"]="$MODEL_IMPLEMENTER"
+  )
+  hint ""
+  hint "model — id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
+  hint "Плейсхолдер формата: gpt-4o (Enter — принять значение в скобках)."
+  for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
+    env_name="$(agent_model_env_name "$agent")"
+    chosen="${CLI_MODELS[$agent]}"
+    if [[ -z "$chosen" ]]; then
+      chosen="$(env_or_file "$env_name" "$ENV_FILE")"
+    fi
+    if [[ -z "$chosen" ]]; then
+      chosen="$MODEL"
+    fi
+    chosen="$(read_default "Модель для $agent" "$chosen")"
+    if [[ -z "$chosen" ]]; then
+      echo "model for $agent is required" >&2
+      exit 1
+    fi
+    AGENT_MODELS["$agent"]="$chosen"
+  done
+  complete_step provider
+fi
 
 KBSHFF_BIN="$(ensure_kbshff)"
+complete_step kbshff
 BSL_INDEXER="$(ensure_indexer)"
+complete_step indexer
 BSL_LS_MCP="$(ensure_mcp_js)"
 BSL_LS_JAR=""
 if [[ -n "$BSL_LS_MCP" ]] || [[ -n "$(env_or_file BSL_LS_JAR "$ENV_FILE")" ]]; then
@@ -909,6 +1135,7 @@ if [[ -n "$BSL_LS_MCP" ]] || [[ -n "$(env_or_file BSL_LS_JAR "$ENV_FILE")" ]]; t
 else
   echo "Skipping BSL LS JAR (no bsl-ls-mcp path). Set BSL_LS_MCP / install Node, or use your own MCP."
 fi
+complete_step bsl
 SNTX_OUT="$(ensure_sntx)"
 SNTX_SEM_CONFIG="$(printf '%s\n' "$SNTX_OUT" | sed -n '1p')"
 SNTX_SEM_PYTHON="$(printf '%s\n' "$SNTX_OUT" | sed -n '2p')"
@@ -936,6 +1163,12 @@ fi
   echo "OSCRIPT_BIN=$OSCRIPT_BIN"
   echo "JAVA_HOME=$JAVA_HOME_VAL"
 } | dotenv_set_many "$ENV_FILE"
+if step_done env; then
+  echo "OK  .env (refreshed, checkpoint)"
+else
+  echo "Wrote $ENV_FILE"
+  complete_step env
+fi
 
 export KBSHFF_PROVIDER_BASE_URL="$BASE_URL"
 export KBSHFF_PROVIDER_MODEL="$MODEL"
@@ -948,12 +1181,18 @@ export SNTX_SEM_CONFIG BSL_INDEXER KBSHFF_BIN OSCRIPT_BIN SNTX_SEM_PYTHON
 [[ -n "$BSL_LS_MCP" ]] && export BSL_LS_MCP
 [[ -n "$BSL_LS_JAR" ]] && export BSL_LS_JAR
 [[ -n "$JAVA_HOME_VAL" ]] && export JAVA_HOME="$JAVA_HOME_VAL"
-echo "Wrote $ENV_FILE"
 
 install_conveyor_profiles "$KBSHFF_BIN" "$REPO_ROOT" "$BASE_URL" "$API_KEY_ENV_NAME"
 
 step "harness dry-run"
-"$OSCRIPT_BIN" -encoding=utf-8 "$REPO_ROOT/harness/run.os" --repo-root "$REPO_ROOT" --dry-run
+if step_done dry_run; then
+  echo "OK  harness dry-run (skipped, checkpoint)"
+else
+  "$OSCRIPT_BIN" -encoding=utf-8 "$REPO_ROOT/harness/run.os" --repo-root "$REPO_ROOT" --dry-run
+  complete_step dry_run
+fi
+
+clear_install_state
 
 echo ""
 echo "Install OK. Conveyor is ready."

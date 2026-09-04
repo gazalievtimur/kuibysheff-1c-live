@@ -16,14 +16,16 @@
 .\scripts\install.cmd
 # если ExecutionPolicy=Restricted: не меняйте политику машины, запускайте .cmd
 # или: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
-# флаги: -SkipIngest -NonInteractive -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin" -OscriptVersion stable
+# флаги: -SkipIngest -NonInteractive -Fresh -ToolsDir D:\tools -PlatformPath "C:\Program Files\1cv8\8.3.xx\bin" -OscriptVersion stable
 ```
 
 ```bash
 chmod +x scripts/install.sh
 ./scripts/install.sh
-# --skip-ingest --non-interactive --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin --oscript-version stable
+# --skip-ingest --non-interactive --fresh --tools-dir /opt/kbshff-tools --platform-path /opt/1cv8/bin --oscript-version stable
 ```
+
+Повторный запуск продолжит с последнего checkpoint (файл `.install-state.json` в корне репо). `-Fresh` / `--fresh` — с нуля. После успешного завершения state удаляется.
 
 Скрипт:
 
