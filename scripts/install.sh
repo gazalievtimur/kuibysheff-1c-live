@@ -795,12 +795,16 @@ ensure_sntx() {
     config="$src/config.yaml"
   fi
   setup_ok=0
-  if step_done sntx_setup && [[ -n "$src" && -x "$venv_py" && -f "$config" ]]; then
+  if step_done sntx_setup && [[ -n "$src" && -x "$venv_py" && -f "$config" ]] \
+    && (cd "$src" && "$venv_py" -c "from sntx_sem.config import load_config" >/dev/null 2>&1); then
     setup_ok=1
   fi
   if [[ "$setup_ok" -eq 1 ]]; then
     echo "OK  1c-sntx-sem setup (skipped, checkpoint)"
   else
+    if step_done sntx_setup && [[ -n "$src" ]]; then
+      echo "Checkpoint sntx_setup present, but sntx_sem import failed - repairing checkout/venv." >&2
+    fi
     if [[ -z "$src" ]]; then
       have git || { echo "git not found (needed to clone 1c-sntx-sem)" >&2; exit 1; }
       src="$TOOLS_DIR/1c-sntx-sem"
