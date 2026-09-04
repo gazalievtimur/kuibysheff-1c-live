@@ -64,6 +64,10 @@ fi
 INSTALL_STATE_PATH="$REPO_ROOT/.install-state.json"
 INSTALL_COMPLETED=()
 INSTALL_PLATFORM_PATH=""
+INSTALL_PROVIDER_BASE_URL=""
+INSTALL_PROVIDER_API_KEY_ENV=""
+INSTALL_PROVIDER_MODEL=""
+declare -A INSTALL_PROVIDER_MODELS=()
 
 step() { echo "==> $*"; }
 hint() {
@@ -84,14 +88,31 @@ have() { command -v "$1" >/dev/null 2>&1; }
 save_install_state() {
   COMPLETED_LINES="$(printf '%s\n' "${INSTALL_COMPLETED[@]+"${INSTALL_COMPLETED[@]}"}")" \
   PLATFORM_PATH_STATE="$INSTALL_PLATFORM_PATH" \
+  PROVIDER_BASE_URL_STATE="$INSTALL_PROVIDER_BASE_URL" \
+  PROVIDER_API_KEY_ENV_STATE="$INSTALL_PROVIDER_API_KEY_ENV" \
+  PROVIDER_MODEL_STATE="$INSTALL_PROVIDER_MODEL" \
+  MODELS_PAIRS="$(for k in "${!INSTALL_PROVIDER_MODELS[@]+"${!INSTALL_PROVIDER_MODELS[@]}"}"; do printf '%s=%s\n' "$k" "${INSTALL_PROVIDER_MODELS[$k]}"; done)" \
   python3 - "$INSTALL_STATE_PATH" <<'PY'
 import datetime, json, os, sys
 path = sys.argv[1]
 steps = [s for s in os.environ.get("COMPLETED_LINES", "").splitlines() if s.strip()]
+agent_models = {}
+for line in os.environ.get("MODELS_PAIRS", "").splitlines():
+    if "=" not in line:
+        continue
+    k, v = line.split("=", 1)
+    if k.strip():
+        agent_models[k.strip()] = v
 payload = {
     "version": 1,
     "completed": steps,
     "platform_path": os.environ.get("PLATFORM_PATH_STATE", ""),
+    "provider": {
+        "base_url": os.environ.get("PROVIDER_BASE_URL_STATE", ""),
+        "api_key_env": os.environ.get("PROVIDER_API_KEY_ENV_STATE", ""),
+        "model": os.environ.get("PROVIDER_MODEL_STATE", ""),
+        "agent_models": agent_models,
+    },
     "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }
 with open(path, "w", encoding="utf-8") as f:
@@ -102,6 +123,10 @@ PY
 import_install_state() {
   INSTALL_COMPLETED=()
   INSTALL_PLATFORM_PATH=""
+  INSTALL_PROVIDER_BASE_URL=""
+  INSTALL_PROVIDER_API_KEY_ENV=""
+  INSTALL_PROVIDER_MODEL=""
+  INSTALL_PROVIDER_MODELS=()
   [[ -f "$INSTALL_STATE_PATH" ]] || return 0
   eval "$(python3 - "$INSTALL_STATE_PATH" <<'PY'
 import json, shlex, sys
@@ -113,10 +138,16 @@ except Exception as exc:
     sys.exit(0)
 platform = obj.get("platform_path") or ""
 print(f"INSTALL_PLATFORM_PATH={shlex.quote(str(platform))}")
+prov = obj.get("provider") or {}
+print(f"INSTALL_PROVIDER_BASE_URL={shlex.quote(str(prov.get('base_url') or ''))}")
+print(f"INSTALL_PROVIDER_API_KEY_ENV={shlex.quote(str(prov.get('api_key_env') or ''))}")
+print(f"INSTALL_PROVIDER_MODEL={shlex.quote(str(prov.get('model') or ''))}")
 for step in obj.get("completed") or []:
     s = str(step).strip()
     if s:
         print(f"INSTALL_COMPLETED+=({shlex.quote(s)})")
+for k, v in (prov.get("agent_models") or {}).items():
+    print(f"INSTALL_PROVIDER_MODELS[{shlex.quote(str(k))}]={shlex.quote(str(v))}")
 PY
 )"
 }
@@ -124,6 +155,11 @@ PY
 clear_install_state() {
   INSTALL_COMPLETED=()
   INSTALL_PLATFORM_PATH=""
+  INSTALL_PROVIDER_BASE_URL=""
+  INSTALL_PROVIDER_API_KEY_ENV=""
+  INSTALL_PROVIDER_MODEL=""
+  INSTALL_PROVIDER_MODELS=()
+  declare -A INSTALL_PROVIDER_MODELS=()
   rm -f "$INSTALL_STATE_PATH"
 }
 
@@ -1011,8 +1047,10 @@ step "AI provider"
 PROVIDER_FROM_CHECKPOINT=0
 if step_done provider; then
   [[ -n "$BASE_URL" ]] || BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
+  [[ -n "$BASE_URL" ]] || BASE_URL="$INSTALL_PROVIDER_BASE_URL"
   [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
   [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
+  [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="$INSTALL_PROVIDER_API_KEY_ENV"
   [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="OPENAI_API_KEY"
   API_KEY="$(env_or_file "$API_KEY_ENV_NAME" "$ENV_FILE")"
   if [[ -z "$API_KEY" ]]; then
@@ -1020,11 +1058,13 @@ if step_done provider; then
   fi
   if [[ -n "$API_KEY" ]]; then
     [[ -n "$MODEL" ]] || MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
+    [[ -n "$MODEL" ]] || MODEL="$INSTALL_PROVIDER_MODEL"
     [[ -n "$MODEL" ]] || MODEL="gpt-4o"
     declare -A AGENT_MODELS=()
     for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
       env_name="$(agent_model_env_name "$agent")"
       chosen="$(env_or_file "$env_name" "$ENV_FILE")"
+      [[ -n "$chosen" ]] || chosen="${INSTALL_PROVIDER_MODELS[$agent]-}"
       [[ -n "$chosen" ]] || chosen="$MODEL"
       AGENT_MODELS["$agent"]="$chosen"
     done
@@ -1035,6 +1075,30 @@ if step_done provider; then
     echo "Checkpoint 'provider' set, but API key for $API_KEY_ENV_NAME missing - asking again." >&2
   fi
 fi
+
+save_provider_progress() {
+  INSTALL_PROVIDER_BASE_URL="$BASE_URL"
+  INSTALL_PROVIDER_API_KEY_ENV="$API_KEY_ENV_NAME"
+  INSTALL_PROVIDER_MODEL="$MODEL"
+  INSTALL_PROVIDER_MODELS=()
+  declare -A INSTALL_PROVIDER_MODELS=()
+  local agent
+  for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
+    INSTALL_PROVIDER_MODELS["$agent"]="${AGENT_MODELS[$agent]}"
+  done
+  save_install_state
+  {
+    echo "KBSHFF_PROVIDER_BASE_URL=$BASE_URL"
+    echo "KBSHFF_PROVIDER_MODEL=$MODEL"
+    echo "KBSHFF_PROVIDER_MODEL_1C_ANALYST=${AGENT_MODELS[1c-analyst]}"
+    echo "KBSHFF_PROVIDER_MODEL_1C_YAXUNIT=${AGENT_MODELS[1c-yaxunit]}"
+    echo "KBSHFF_PROVIDER_MODEL_1C_CODER=${AGENT_MODELS[1c-coder]}"
+    echo "KBSHFF_PROVIDER_MODEL_1C_IMPLEMENTER=${AGENT_MODELS[1c-implementer]}"
+    echo "KBSHFF_PROVIDER_API_KEY_ENV=$API_KEY_ENV_NAME"
+    echo "${API_KEY_ENV_NAME}=$API_KEY"
+  } | dotenv_set_many "$ENV_FILE"
+  echo "Wrote provider settings -> $ENV_FILE"
+}
 
 if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
   if [[ "$NON_INTERACTIVE" -eq 0 ]]; then
@@ -1048,27 +1112,39 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
   fi
   if [[ -z "$BASE_URL" ]]; then
     BASE_URL="$(env_or_file KBSHFF_PROVIDER_BASE_URL "$ENV_FILE")"
-    [[ -n "$BASE_URL" ]] || BASE_URL="https://api.openai.com/v1"
-    hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
-    hint "Пример формата: https://api.example.com/v1"
-    BASE_URL="$(read_default "URL эндпоинта (base_url)" "$BASE_URL")"
+    [[ -n "$BASE_URL" ]] || BASE_URL="$INSTALL_PROVIDER_BASE_URL"
+    if [[ -n "$BASE_URL" ]]; then
+      echo "OK  base_url (.env/state): $BASE_URL"
+    else
+      BASE_URL="https://api.openai.com/v1"
+      hint "base_url — общий URL эндпоинта до /v1 для всех агентов."
+      hint "Пример формата: https://api.example.com/v1"
+      BASE_URL="$(read_default "URL эндпоинта (base_url)" "$BASE_URL")"
+    fi
   fi
+  INSTALL_PROVIDER_BASE_URL="$BASE_URL"
+  save_install_state
   PASTED_API_KEY=""
   if [[ -z "$API_KEY_ENV_NAME" ]]; then
     API_KEY_ENV_NAME="$(env_or_file KBSHFF_PROVIDER_API_KEY_ENV "$ENV_FILE")"
-    [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="OPENAI_API_KEY"
-    hint ""
-    hint "Имя переменной окружения для API-ключа (не сам ключ)."
-    hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
-    hint "kbshff читает секрет из env с этим именем."
-    RAW_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
-    if looks_like_api_key "$RAW_ENV_NAME"; then
-      echo "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY." >&2
-      PASTED_API_KEY="$RAW_ENV_NAME"
-      API_KEY_ENV_NAME="OPENAI_API_KEY"
-      API_KEY_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+    [[ -n "$API_KEY_ENV_NAME" ]] || API_KEY_ENV_NAME="$INSTALL_PROVIDER_API_KEY_ENV"
+    if [[ -n "$API_KEY_ENV_NAME" ]]; then
+      echo "OK  API key env (.env/state): $API_KEY_ENV_NAME"
     else
-      API_KEY_ENV_NAME="$RAW_ENV_NAME"
+      API_KEY_ENV_NAME="OPENAI_API_KEY"
+      hint ""
+      hint "Имя переменной окружения для API-ключа (не сам ключ)."
+      hint "Пример: OPENAI_API_KEY. Сам ключ спросим следующим шагом (ввод скрыт)."
+      hint "kbshff читает секрет из env с этим именем."
+      RAW_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+      if looks_like_api_key "$RAW_ENV_NAME"; then
+        echo "Похоже, вы вставили сам API-ключ вместо имени переменной. Ключ сохраним как секрет; имя env = OPENAI_API_KEY." >&2
+        PASTED_API_KEY="$RAW_ENV_NAME"
+        API_KEY_ENV_NAME="OPENAI_API_KEY"
+        API_KEY_ENV_NAME="$(read_default "Имя переменной для API-ключа" "$API_KEY_ENV_NAME")"
+      else
+        API_KEY_ENV_NAME="$RAW_ENV_NAME"
+      fi
     fi
     if ! valid_env_var_name "$API_KEY_ENV_NAME"; then
       echo "Invalid API key env var name '$API_KEY_ENV_NAME'. Use something like OPENAI_API_KEY." >&2
@@ -1090,6 +1166,8 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
       echo "Пустой ввод (попытка $attempt/3). Вставьте ключ ещё раз — символы не отображаются." >&2
       attempt=$((attempt + 1))
     done
+  else
+    echo "OK  API key (.env/env): $API_KEY_ENV_NAME"
   fi
   if [[ -z "$API_KEY" ]]; then
     echo "API key for $API_KEY_ENV_NAME is required" >&2
@@ -1100,6 +1178,7 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
   if [[ -z "$MODEL" ]]; then
     MODEL="$(env_or_file KBSHFF_PROVIDER_MODEL "$ENV_FILE")"
   fi
+  [[ -n "$MODEL" ]] || MODEL="$INSTALL_PROVIDER_MODEL"
   [[ -n "$MODEL" ]] || MODEL="gpt-4o"
 
   declare -A AGENT_MODELS=()
@@ -1109,25 +1188,40 @@ if [[ "$PROVIDER_FROM_CHECKPOINT" -eq 0 ]]; then
     ["1c-coder"]="$MODEL_CODER"
     ["1c-implementer"]="$MODEL_IMPLEMENTER"
   )
-  hint ""
-  hint "model — id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
-  hint "Плейсхолдер формата: gpt-4o (Enter — принять значение в скобках)."
+  have_all_models=1
   for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
     env_name="$(agent_model_env_name "$agent")"
     chosen="${CLI_MODELS[$agent]}"
     if [[ -z "$chosen" ]]; then
       chosen="$(env_or_file "$env_name" "$ENV_FILE")"
     fi
+    if [[ -z "$chosen" && -n "${INSTALL_PROVIDER_MODELS[$agent]+x}" ]]; then
+      chosen="${INSTALL_PROVIDER_MODELS[$agent]}"
+    fi
     if [[ -z "$chosen" ]]; then
       chosen="$MODEL"
-    fi
-    chosen="$(read_default "Модель для $agent" "$chosen")"
-    if [[ -z "$chosen" ]]; then
-      echo "model for $agent is required" >&2
-      exit 1
+      have_all_models=0
     fi
     AGENT_MODELS["$agent"]="$chosen"
   done
+  if [[ "$have_all_models" -eq 1 ]]; then
+    for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
+      echo "OK  model $agent: ${AGENT_MODELS[$agent]}"
+    done
+  else
+    hint ""
+    hint "model — id модели у провайдера. Один эндпоинт, но модель можно выбрать разной для каждой стадии."
+    hint "Плейсхолдер формата: gpt-4o (Enter — принять значение в скобках)."
+    for agent in 1c-analyst 1c-yaxunit 1c-coder 1c-implementer; do
+      chosen="$(read_default "Модель для $agent" "${AGENT_MODELS[$agent]}")"
+      if [[ -z "$chosen" ]]; then
+        echo "model for $agent is required" >&2
+        exit 1
+      fi
+      AGENT_MODELS["$agent"]="$chosen"
+    done
+  fi
+  save_provider_progress
   complete_step provider
 fi
 
