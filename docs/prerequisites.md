@@ -13,7 +13,7 @@
 | **Git** | clone зависимостей при необходимости | [git-scm.com](https://git-scm.com/downloads) |
 | **Python 3** | runtime MCP `1c-sntx-sem` (venv при install) | [python.org](https://www.python.org/downloads/) — на Windows удобен `py -3` |
 
-Install клонирует [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) на известный рабочий коммит (`-SntxSemGitRef` / `SNTX_SEM_GIT_REF`): на `main` сейчас отсутствует `src/sntx_sem/config.py`, из‑за чего `ingest` падает с `ModuleNotFoundError`. Уже скачанный сломанный clone в `tools/1c-sntx-sem` install поправит checkout’ом.
+Install клонирует [`1c-sntx-sem`](https://github.com/gybson63/1c-sntx-sem) с ветки `main` (override: `-SntxSemGitRef` / `SNTX_SEM_GIT_REF`). Если локальный clone в `tools/1c-sntx-sem` сломан (нет `sntx_sem.config`), install сделает checkout и `pip install -e .` заново.
 | **curl** | загрузки GitHub Releases | входит в ОС или [curl.se](https://curl.se/download.html) |
 | **unzip** (Linux) | распаковка zip `kbshff` | напр. `sudo apt install unzip` |
 | **.NET Framework 4.8+** (Windows) или **Mono 6+** (Linux/macOS) | только если install качает OVM (`ovm.exe`) | обычно уже есть на Win10+; Linux: пакеты Mono |
