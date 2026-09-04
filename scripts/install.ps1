@@ -879,6 +879,28 @@ function Clone-SntxSem([string]$Dest) {
     Invoke-NativeProcess -FilePath "git" -ArgumentList @("-C", $Dest, "checkout", "FETCH_HEAD") -FailMessage "git checkout 1c-sntx-sem failed"
 }
 
+function Test-SntxSemImport([string]$VenvPy, [string]$Src) {
+    try {
+        Invoke-Python -PythonCmd @($VenvPy) -PythonArgs @("-c", "from sntx_sem.config import load_config") -WorkDir $Src
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Install-SntxSemEditable([string]$Src, [string]$VenvPy, [string[]]$PythonCmd) {
+    Ensure-SntxSemGitCheckout $Src
+    if (-not (Test-Path -LiteralPath $VenvPy -PathType Leaf)) {
+        Invoke-Python -PythonCmd $PythonCmd -PythonArgs @("-m", "venv", ".venv") -WorkDir $Src
+    }
+    Invoke-Python -PythonCmd @($VenvPy) -PythonArgs @("-m", "pip", "install", "-U", "pip")
+    Invoke-Python -PythonCmd @($VenvPy) -PythonArgs @("-m", "pip", "install", "-e", ".") -WorkDir $Src
+    if (-not (Test-SntxSemImport $VenvPy $Src)) {
+        throw "1c-sntx-sem import check failed (from sntx_sem.config import load_config). Pin SNTX_SEM_GIT_REF / -SntxSemGitRef to a revision that still has config.py."
+    }
+}
+
 function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
     Write-Step "1c-sntx-sem"
     $existing = Get-EnvOrMap $EnvMap "SNTX_SEM_CONFIG"
@@ -901,11 +923,14 @@ function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
         $venvPy = Join-Path $src ".venv\Scripts\python.exe"
         $config = Join-Path $src "config.yaml"
     }
-    $setupOk = (Test-InstallStepDone "sntx_setup") -and $src -and (Test-Path -LiteralPath $venvPy -PathType Leaf) -and (Test-Path -LiteralPath $config -PathType Leaf)
+    $setupOk = (Test-InstallStepDone "sntx_setup") -and $src -and (Test-Path -LiteralPath $venvPy -PathType Leaf) -and (Test-Path -LiteralPath $config -PathType Leaf) -and (Test-SntxSemImport $venvPy $src)
     if ($setupOk) {
         Write-Host "OK  1c-sntx-sem setup (skipped, checkpoint)"
     }
     else {
+        if ((Test-InstallStepDone "sntx_setup") -and $src) {
+            Write-Warning "Checkpoint sntx_setup present, but sntx_sem import failed - repairing checkout/venv."
+        }
         if (-not $src) {
             if (-not (Test-Command "git")) {
                 throw "git not found (needed to clone 1c-sntx-sem). https://github.com/gybson63/1c-sntx-sem"
@@ -913,19 +938,8 @@ function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
             $src = Join-Path $ToolsDir "1c-sntx-sem"
             Clone-SntxSem $src
         }
-        Ensure-SntxSemGitCheckout $src
         $venvPy = Join-Path $src ".venv\Scripts\python.exe"
-        if (-not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
-            Invoke-Python -PythonCmd $PythonCmd -PythonArgs @("-m", "venv", ".venv") -WorkDir $src
-        }
-        Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-U", "pip")
-        Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "pip", "install", "-e", ".") -WorkDir $src
-        try {
-            Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-c", "from sntx_sem.config import load_config") -WorkDir $src
-        }
-        catch {
-            throw "1c-sntx-sem import check failed (from sntx_sem.config import load_config). Pin SNTX_SEM_GIT_REF / -SntxSemGitRef to a revision that still has config.py. $_"
-        }
+        Install-SntxSemEditable $src $venvPy $PythonCmd
         $config = Join-Path $src "config.yaml"
         if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
             $example = Join-Path $src "config.yaml.example"
@@ -955,14 +969,18 @@ function Ensure-SntxSem([hashtable]$EnvMap, [string[]]$PythonCmd) {
             Complete-InstallStep "ingest"
         }
         else {
+            $ingestOk = $false
             try {
                 Invoke-Python -PythonCmd @($venvPy) -PythonArgs @("-m", "sntx_sem", "ingest", "--platform-path", $chosenPlatform) -WorkDir $src
-                Complete-InstallStep "ingest"
+                $ingestOk = $true
             }
             catch {
                 Write-Warning "sntx_sem ingest failed (install continues without platform help index): $_"
                 Write-Warning "Re-run later: `"$venvPy`" -m sntx_sem ingest --platform-path `"$chosenPlatform`""
                 Write-Warning "Or re-run install.cmd to resume from ingest after fixing 1c-sntx-sem."
+            }
+            if ($ingestOk) {
+                Complete-InstallStep "ingest"
             }
         }
     }
