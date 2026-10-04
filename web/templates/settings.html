@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block body %}
+<h1>Настройки</h1>
+{% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<h2>Агент (LLM)</h2>
+<form method="post" action="/settings/llm">
+  <label>base_url</label>
+  <input type="text" name="base_url" value="{{ settings.llm.base_url }}">
+  <label>Имя переменной ключа</label>
+  <input type="text" name="api_key_env" value="{{ settings.llm.api_key_env }}">
+  <label>Ключ</label>
+  <input type="password" name="api_key" placeholder="{{ 'сохранён, оставьте пустым чтобы не менять' if settings.llm.api_key else 'вставьте ключ' }}">
+  <input type="hidden" name="keep_key" value="1">
+  {% for agent in agents %}
+  <label>Модель {{ agent }}</label>
+  <input type="text" name="{{ agent.split('-')[-1] }}" value="{{ settings.llm.models[agent] }}">
+  {% endfor %}
+  <div class="row">
+    <button>Сохранить LLM</button>
+  </div>
+</form>
+<form method="post" action="/settings/llm/check"><button type="submit">Проверить /models</button></form>
+
+<h2>Эмбеддинги (внешний API)</h2>
+<p class="muted">Один ключ для sntx-sem и conf-doc. Локальные модели не используются. Пустые поля моделей сервисов берут общую модель.</p>
+<form method="post" action="/settings/embeddings">
+  <label>base_url</label>
+  <input type="text" name="base_url" value="{{ settings.embeddings.base_url }}">
+  <label>Ключ</label>
+  <input type="password" name="api_key" placeholder="{{ 'сохранён' if settings.embeddings.api_key else 'вставьте ключ' }}">
+  <input type="hidden" name="keep_key" value="1">
+  <label>Модель</label>
+  <input type="text" name="model" value="{{ settings.embeddings.model }}">
+  <label>Модель sntx-sem (необязательно)</label>
+  <input type="text" name="model_sntx" value="{{ settings.embeddings.model_sntx }}">
+  <label>Модель conf-doc (необязательно)</label>
+  <input type="text" name="model_confdoc" value="{{ settings.embeddings.model_confdoc }}">
+  <button>Сохранить эмбеддинги</button>
+</form>
+<form method="post" action="/settings/embeddings/check"><button>Проверить /embeddings</button></form>
+<form method="post" action="/settings/reindex"><button>Переиндексировать conf-doc</button></form>
+<p class="muted">Справку sntx-sem после смены модели пересоберите в <a href="{{ ui.sntx }}">её интерфейсе</a> (Rebuild Index).</p>
+{% endblock %}

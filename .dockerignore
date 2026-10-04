@@ -1,0 +1,17 @@
+.git
+.env
+.kuibysheff
+.install-state.json
+harness/runs
+harness/notes/runs
+tools/bsl-indexer
+tools/bsl-indexer.exe
+tools/code-index
+tools/bsl-ls
+tools/1c-sntx-sem
+tools/.kbshff-install
+tools/bsl-ls-mcp/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+agent-config.local.yaml

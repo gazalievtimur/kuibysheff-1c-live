@@ -1,0 +1,34 @@
+services:
+  kuibysheff-1c-live:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      secrets:
+        - github_token
+
+    image: kuibysheff-1c-live
+    ports:
+      - "8080:8080"
+      - "8050:8050"
+      - "8051:8051"
+      - "8888:8888"
+    volumes:
+      - kbshff-data:/data
+      # Платформа 1С с хоста (лицензия). Нужна для ingest справки и --require-platform.
+      # - /opt/1cv8:/opt/1cv8:ro
+    environment:
+      WEB_USER: ${WEB_USER:-admin}
+      WEB_PASSWORD: ${WEB_PASSWORD:-}
+      # Необязательные значения по умолчанию, дальше правятся в портале.
+      # LLM_BASE_URL: https://api.openai.com/v1
+      # OPENAI_API_KEY: ""
+      # EMBEDDINGS_BASE_URL: https://api.openai.com/v1
+      # EMBEDDINGS_API_KEY: ""
+      # EMBEDDINGS_MODEL: text-embedding-3-small
+
+volumes:
+  kbshff-data:
+
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN

@@ -40,7 +40,7 @@
 	Возврат Результат;
 КонецФункции
 
-Процедура Записать(Путь, БазовыйТекст, КаталогЛогов, CfRoot, CfIndexRoot, SntxConfig, Indexer, SntxCommand, SntxArgs, IncludeSearxng, BslLs, ИмяСтадии) Экспорт
+Процедура Записать(Путь, БазовыйТекст, КаталогЛогов, CfRoot, CfIndexRoot, SntxConfig, Indexer, SntxCommand, SntxArgs, IncludeSearxng, BslLs, ИмяСтадии, SntxApiUrl = "", ConfDoc = Неопределено) Экспорт
 	ПС = Символы.ПС;
 	AgentId = "1c-" + ИмяСтадии;
 	Пров = Провайдер(БазовыйТекст, AgentId);
@@ -73,7 +73,10 @@
 	SntxS = Экран(СтрЗаменить(SntxConfig, "\", "/"));
 	IdxS = Экран(СтрЗаменить(Indexer, "\", "/"));
 	CmdS = Экран(СтрЗаменить(SntxCommand, "\", "/"));
-	SntxSrc = Экран(СтрЗаменить(Окружение.ОбъединитьПуть(Окружение.РодительскийКаталог(SntxConfig), "src"), "\", "/"));
+	SntxSrc = "";
+	Если ЗначениеЗаполнено(SntxConfig) Тогда
+		SntxSrc = Экран(СтрЗаменить(Окружение.ОбъединитьПуть(Окружение.РодительскийКаталог(SntxConfig), "src"), "\", "/"));
+	КонецЕсли;
 	ArgsYaml = ArgsВYaml(SntxArgs);
 	ДопEnv = "";
 	Для Каждого Ключ Из СтрРазделить("APPDATA,LOCALAPPDATA,USERPROFILE,USERNAME", ",", Ложь) Цикл
@@ -90,9 +93,26 @@
 	КонецЦикла;
 	Searx = "";
 	Если IncludeSearxng Тогда
+		SearxUrl = СокрЛП(Окружение.ПеременнаяСреды("SEARXNG_MCP_URL"));
+		Если Не ЗначениеЗаполнено(SearxUrl) Тогда
+			SearxUrl = "http://127.0.0.1:3000/mcp";
+		КонецЕсли;
 		Searx = ПС + "  - name: ""searxng""" + ПС
 			+ "    transport: http" + ПС
-			+ "    url: ""http://127.0.0.1:3000/mcp""" + ПС
+			+ "    url: """ + Экран(SearxUrl) + """" + ПС
+			+ "    timeout_ms: 60000" + ПС;
+	КонецЕсли;
+	ConfDocBlock = "";
+	Если ИмяСтадии = "analyst" И ConfDoc <> Неопределено Тогда
+		ConfCmd = Экран(СтрЗаменить(Окружение.АбсолютныйПуть(ConfDoc.Command), "\", "/"));
+		ConfEnv = ПС + "      CONF_DOC_API_URL: """ + Экран(ConfDoc.ApiUrl) + """";
+		Если ЗначениеЗаполнено(ConfDoc.Configuration) Тогда
+			ConfEnv = ConfEnv + ПС + "      CONF_DOC_CONFIGURATION: """ + Экран(ConfDoc.Configuration) + """";
+		КонецЕсли;
+		ConfDocBlock = ПС + "  - name: ""conf_doc""" + ПС
+			+ "    command: """ + ConfCmd + """" + ПС
+			+ "    args: [""mcp""]" + ПС
+			+ "    env:" + ConfEnv + ПС
 			+ "    timeout_ms: 60000" + ПС;
 	КонецЕсли;
 	BslBlock = "";
@@ -124,8 +144,15 @@
 		ProgramsBlock = "    programs: []";
 	КонецЕсли;
 	PythonPathLine = "";
-	Если СтрНайти(НРег(SntxCommand), "python") > 0 Тогда
+	Если Не ЗначениеЗаполнено(SntxApiUrl) И СтрНайти(НРег(SntxCommand), "python") > 0 И ЗначениеЗаполнено(SntxSrc) Тогда
 		PythonPathLine = ПС + "      PYTHONPATH: """ + SntxSrc + """";
+	КонецЕсли;
+	SntxEnv = "";
+	Если ЗначениеЗаполнено(SntxApiUrl) Тогда
+		SntxEnv = ПС + "      SNTX_SEM_API_URL: """ + Экран(SntxApiUrl) + """";
+	КонецЕсли;
+	Если ЗначениеЗаполнено(SntxConfig) Тогда
+		SntxEnv = SntxEnv + ПС + "      SNTX_SEM_CONFIG: """ + SntxS + """";
 	КонецЕсли;
 	Строки = Новый Массив;
 	Строки.Добавить("provider:");
@@ -141,8 +168,7 @@
 	Строки.Добавить("    command: """ + CmdS + """");
 	Строки.Добавить("    args: " + ArgsYaml);
 	Строки.Добавить("    env:");
-	Строки.Добавить("      SNTX_SEM_CONFIG: """ + SntxS + """");
-	Строки.Добавить("      SNTX_SEM_MCP_LOG_LEVEL: ""INFO""" + PythonPathLine + ДопEnv);
+	Строки.Добавить("      SNTX_SEM_MCP_LOG_LEVEL: ""INFO""" + SntxEnv + PythonPathLine + ДопEnv);
 	Строки.Добавить("    timeout_ms: 60000");
 	Строки.Добавить("");
 	Строки.Добавить("  - name: ""code-index""");
@@ -150,7 +176,7 @@
 	Строки.Добавить("    args: [""serve"", ""--path"", ""cf=" + CfIndexS + """]");
 	Строки.Добавить("    timeout_ms: 60000");
 	Строки.Добавить("");
-	Текст = СтрСоединить(Строки, ПС) + BslBlock + Searx;
+	Текст = СтрСоединить(Строки, ПС) + BslBlock + ConfDocBlock + Searx;
 	Если Не СтрЗаканчиваетсяНа(Текст, ПС) Тогда
 		Текст = Текст + ПС;
 	КонецЕсли;

@@ -173,7 +173,7 @@
 	КонецЦикла;
 	Отчёт = Новый Соответствие;
 	Отчёт.Вставить("run_id", RunId);
-	Отчёт.Вставить("product", "sklad");
+	Отчёт.Вставить("product", Параметры.ProductId);
 	Отчёт.Вставить("bank_dir", BankDir);
 	Отчёт.Вставить("passed", Passed);
 	Отчёт.Вставить("failed", Failed);
@@ -237,9 +237,13 @@
 			Если Описание.Имя = "yaxunit" Или Описание.Имя = "coder" Или Описание.Имя = "implementer" Тогда
 				BslДляСтадии = BslLs;
 			КонецЕсли;
-			КонвейерКонфиг.Записать(CfgOut, БазовыйТекст, LogDir, CfCopy, CfDir, Mcp.SntxConfig, Mcp.Indexer, Mcp.Command, Mcp.Args, Параметры.WithSearxng И (Описание.Имя = "analyst" Или Описание.Имя = "yaxunit"), BslДляСтадии, Описание.Имя);
+			ConfDocДляСтадии = Неопределено;
+			Если Описание.Имя = "analyst" Тогда
+				ConfDocДляСтадии = РазрешитьConfDoc(Параметры.ConfDocConfiguration);
+			КонецЕсли;
+			КонвейерКонфиг.Записать(CfgOut, БазовыйТекст, LogDir, CfCopy, CfDir, Mcp.SntxConfig, Mcp.Indexer, Mcp.Command, Mcp.Args, Параметры.WithSearxng И (Описание.Имя = "analyst" Или Описание.Имя = "yaxunit"), BslДляСтадии, Описание.Имя, Mcp.ApiUrl, ConfDocДляСтадии);
 			ПрименитьПровайдераCli(AgentBin, ProjectRoot, Описание.Агент, БазовыйТекст);
-			ПодготовитьВходСтадии(Описание.Имя, HomeDir, Задача, TaskId, CfCopy, CfDir, Дома, КаталогHarness);
+			ПодготовитьВходСтадии(Описание.Имя, HomeDir, Задача, TaskId, CfCopy, CfDir, Дома, КаталогHarness, Параметры.ProductId, Параметры.ProductName);
 			AnalystAgr = Неопределено;
 			Если Описание.Имя <> "analyst" Тогда
 				Ah = Дома.Получить("analyst");
@@ -248,7 +252,7 @@
 				КонецЕсли;
 			КонецЕсли;
 			ПосеятьДоговорённости(HomeDir, TaskId, Ожидание, ПутьПротокола(КореньРепо), AnalystAgr);
-			Вывод = ЗапуститьАгента(AgentBin, ProjectRoot, Описание.Агент, HomeRel, КонвейерПромпты.ДляСтадии(Описание.Имя, "sklad", Ожидание), Окружение.ОбъединитьПуть(TaskDir, "logs", Описание.Имя + ".run.json"));
+			Вывод = ЗапуститьАгента(AgentBin, ProjectRoot, Описание.Агент, HomeRel, КонвейерПромпты.ДляСтадии(Описание.Имя, Параметры.ProductId, Ожидание), Окружение.ОбъединитьПуть(TaskDir, "logs", Описание.Имя + ".run.json"));
 			Выводы.Вставить(Описание.Имя, Вывод);
 		КонецЦикла;
 		FpAfter = ХешДерева.Отпечаток(CfCopy);
@@ -322,13 +326,13 @@
 	Возврат "skipped";
 КонецФункции
 
-Процедура ПодготовитьВходСтадии(Имя, HomeDir, Задача, TaskId, CfCopy, CfDir, Дома, КаталогHarness)
+Процедура ПодготовитьВходСтадии(Имя, HomeDir, Задача, TaskId, CfCopy, CfDir, Дома, КаталогHarness, ProductId, ProductName)
 	InDir = Окружение.ОбъединитьПуть(HomeDir, "in");
 	Если Имя = "analyst" Тогда
 		Окружение.ЗаписатьТекст(Окружение.ОбъединитьПуть(InDir, "task_brief.md"), Строка(JsonУтилиты.ПолучитьПоле(Задача, "brief", "")));
 		Product = Новый Соответствие;
-		Product.Вставить("id", "sklad");
-		Product.Вставить("name", "Склад");
+		Product.Вставить("id", ProductId);
+		Product.Вставить("name", ProductName);
 		Product.Вставить("cf_root", CfCopy);
 		Product.Вставить("code_index_repo", "cf");
 		Product.Вставить("code_index_root", CfDir);
@@ -523,6 +527,7 @@
 
 Функция РазрешитьMcp(КореньРепо)
 	Sntx = Окружение.ПеременнаяСреды("SNTX_SEM_CONFIG");
+	ApiUrl = СокрЛП(Окружение.ПеременнаяСреды("SNTX_SEM_API_URL"));
 	Indexer = Окружение.ПеременнаяСреды("BSL_INDEXER");
 	Если Не ЗначениеЗаполнено(Indexer) Тогда
 		Indexer = Окружение.ПеременнаяСреды("CODE_INDEX_BIN");
@@ -536,7 +541,7 @@
 			Sntx = Кандидат;
 		КонецЕсли;
 	КонецЕсли;
-	Если Не ЗначениеЗаполнено(Sntx) Тогда
+	Если Не ЗначениеЗаполнено(Sntx) И Не ЗначениеЗаполнено(ApiUrl) Тогда
 		ВызватьИсключение "SNTX_SEM_CONFIG is required (path to 1c-sntx-sem config.yaml).";
 	КонецЕсли;
 	Если Не ЗначениеЗаполнено(Indexer) Тогда
@@ -560,15 +565,27 @@
 	Если Не ЗначениеЗаполнено(Indexer) Тогда
 		ВызватьИсключение "BSL_INDEXER / CODE_INDEX_BIN is required (path to bsl-indexer).";
 	КонецЕсли;
-	Если Не Окружение.ФайлСуществует(Sntx) Тогда
+	Если ЗначениеЗаполнено(Sntx) И Не Окружение.ФайлСуществует(Sntx) Тогда
 		ВызватьИсключение "SNTX_SEM_CONFIG file not found: " + Sntx;
 	КонецЕсли;
 	Если Не Окружение.ФайлСуществует(Indexer) Тогда
 		ВызватьИсключение "bsl-indexer not found: " + Indexer;
 	КонецЕсли;
-	Command = Окружение.ПеременнаяСреды("SNTX_SEM_PYTHON");
+	Command = "";
 	Args = Новый Массив;
-	Если Не ЗначениеЗаполнено(Command) Тогда
+	Если ЗначениеЗаполнено(ApiUrl) Тогда
+		Command = Окружение.ПеременнаяСреды("SNTX_SEM_BIN");
+		Если Не ЗначениеЗаполнено(Command) Тогда
+			Command = Окружение.НайтиВPath("sntx-sem");
+		КонецЕсли;
+		Если Не ЗначениеЗаполнено(Command) Тогда
+			ВызватьИсключение "SNTX_SEM_API_URL is set, but sntx-sem is not on PATH (set SNTX_SEM_BIN).";
+		КонецЕсли;
+		Args.Добавить("mcp");
+	Иначе
+		Command = Окружение.ПеременнаяСреды("SNTX_SEM_PYTHON");
+	КонецЕсли;
+	Если Не ЗначениеЗаполнено(ApiUrl) И Не ЗначениеЗаполнено(Command) Тогда
 		КореньSntx = Окружение.РодительскийКаталог(Окружение.АбсолютныйПуть(Sntx));
 		Для Каждого Отн Из СтрРазделить(".venv/Scripts/python.exe,.venv/bin/python", ",", Ложь) Цикл
 			Части = СтрРазделить(Отн, "/", Ложь);
@@ -582,10 +599,10 @@
 			КонецЕсли;
 		КонецЦикла;
 	КонецЕсли;
-	Если ЗначениеЗаполнено(Command) Тогда
+	Если Не ЗначениеЗаполнено(ApiUrl) И ЗначениеЗаполнено(Command) Тогда
 		Args.Добавить("-m");
 		Args.Добавить("sntx_sem.mcp_server");
-	Иначе
+	ИначеЕсли Не ЗначениеЗаполнено(ApiUrl) Тогда
 		Command = Окружение.НайтиВPath("sntx-sem");
 		Если Не ЗначениеЗаполнено(Command) Тогда
 			ВызватьИсключение "SNTX_SEM_PYTHON not found (set it, create 1c-sntx-sem/.venv, or put sntx-sem on PATH).";
@@ -600,6 +617,24 @@
 	Результат.Вставить("Indexer", Indexer);
 	Результат.Вставить("Command", Command);
 	Результат.Вставить("Args", Args);
+	Результат.Вставить("ApiUrl", ApiUrl);
+	Возврат Результат;
+КонецФункции
+
+Функция РазрешитьConfDoc(ИмяКонфигурации)
+	Command = Окружение.ПеременнаяСреды("CONF_DOC_MCP");
+	ApiUrl = СокрЛП(Окружение.ПеременнаяСреды("CONF_DOC_API_URL"));
+	Если Не ЗначениеЗаполнено(Command) Или Не ЗначениеЗаполнено(ApiUrl) Тогда
+		Возврат Неопределено;
+	КонецЕсли;
+	Если Не Окружение.ФайлСуществует(Command) Тогда
+		Сообщить("conf_doc MCP skipped (binary not found): " + Command);
+		Возврат Неопределено;
+	КонецЕсли;
+	Результат = Новый Структура;
+	Результат.Вставить("Command", Command);
+	Результат.Вставить("ApiUrl", ApiUrl);
+	Результат.Вставить("Configuration", СокрЛП(Строка(ИмяКонфигурации)));
 	Возврат Результат;
 КонецФункции
 

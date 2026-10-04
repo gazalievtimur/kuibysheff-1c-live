@@ -1,0 +1,28 @@
+source: /data/configs
+output: /data/conf-doc/output
+
+configuration: null
+
+import_roots:
+  - /app/harness/cf
+  - /data/configs
+
+embeddings:
+  provider: openai
+  base_url: "https://api.openai.com/v1"
+  model: "text-embedding-3-small"
+  openai_api_key: ""
+
+faiss:
+  index_type: flat
+
+chunking:
+  max_tokens: 1500
+  overlap_tokens: 100
+
+llm:
+  provider: none
+
+api:
+  host: 127.0.0.1
+  port: 18050

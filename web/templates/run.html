@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ run_id }}{% endblock %}
+{% block body %}
+<h1>{{ run_id }}</h1>
+<p>
+  <a href="/runs/{{ run_id }}/cfe.zip?kind=cfe">скачать out/cfe</a>
+  ·
+  <a href="/runs/{{ run_id }}/cfe.zip?kind=cfe-tests">скачать out/cfe-tests</a>
+</p>
+{% if report %}
+<h2>report.json</h2>
+<pre>{{ report | tojson(indent=2) }}</pre>
+{% endif %}
+{% if notes %}
+<h2>NOTES.md</h2>
+<pre>{{ notes }}</pre>
+{% endif %}
+<h2>Файлы</h2>
+<ul>
+  {% for path in files %}
+  <li><a href="/runs/{{ run_id }}/file?path={{ path }}">{{ path }}</a></li>
+  {% endfor %}
+</ul>
+{% endblock %}

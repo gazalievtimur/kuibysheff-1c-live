@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Конфигурации{% endblock %}
+{% block body %}
+<h1>Конфигурации 1С</h1>
+{% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if not embeddings %}<p class="error">Эмбеддинги не заданы: conf-doc проиндексирует только метаданные. Семантический поиск появится после сохранения ключа.</p>{% endif %}
+<table>
+  <tr><th>Имя</th><th>Индекс</th><th></th></tr>
+  {% for row in configs %}
+  <tr>
+    <td>
+      <div>{{ row.product_name }}</div>
+      <div class="muted">{{ row.conf_name }} · {{ row.path }}</div>
+      {% if row.error %}<div class="bad">{{ row.error }}</div>{% endif %}
+    </td>
+    <td class="{{ 'ok' if row.status == 'ready' else 'bad' if row.status == 'error' else '' }}">
+      {{ row.status }}{% if row.embeddings %} · эмбеддинги{% endif %}
+    </td>
+    <td>
+      <a href="{{ ui.confdoc }}configuration/{{ row.conf_name }}">conf-doc</a>
+      <form method="post" action="/configs/{{ row.id }}/reindex"><button>Индексировать</button></form>
+      {% if not row.builtin %}
+      <form method="post" action="/configs/{{ row.id }}/delete"><button>Удалить</button></form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<h2>Загрузить XML-выгрузку (zip)</h2>
+<form method="post" action="/configs/upload" enctype="multipart/form-data">
+  <input type="file" name="archive" accept=".zip" required>
+  <button>Загрузить</button>
+</form>
+{% endblock %}
