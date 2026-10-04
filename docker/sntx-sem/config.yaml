@@ -1,0 +1,31 @@
+platform_version: "8.3.27"
+hbk_dir: /data/sntx-sem/hbk
+data_dir: /data/sntx-sem/data
+export_dir: /data/sntx-sem/data/export
+index_dir: /data/sntx-sem/data/index
+
+local_configs: []
+
+bsp:
+  enabled: false
+
+embedding:
+  provider: openai_compatible
+  base_url: "https://api.openai.com/v1"
+  model: "text-embedding-3-small"
+  api_key_env: "EMBEDDINGS_API_KEY"
+  query_prefix: ""
+  passage_prefix: ""
+  batch_size: 16
+  timeout: 600
+
+api:
+  host: 127.0.0.1
+  port: 18051
+
+search:
+  build_vector_index: false
+
+mcp:
+  log_level: INFO
+  log_file: ""

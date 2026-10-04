@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Сервисы{% endblock %}
+{% block body %}
+<h1>Сервисы</h1>
+<p class="muted">Родные интерфейсы открываются на отдельных портах и используют ту же авторизацию, что и портал.</p>
+<table>
+  <tr><th>Сервис</th><th>Состояние</th><th></th></tr>
+  {% for item in services %}
+  <tr>
+    <td>{{ item.title }}</td>
+    <td class="{{ 'ok' if item.ok else 'bad' }}">{{ item.detail }}</td>
+    <td>
+      {% if item.href_port %}
+      <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:{{ item.href_port }}{{ item.href_path }}">открыть</a>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% if ingest_hint %}
+<h2>Справка платформы</h2>
+<p>Индекс sntx-sem пуст, пока не выполнен ingest из смонтированной платформы. В интерфейсе sntx-sem это раздел admin. Если путь к платформе там не задаётся, выполните:</p>
+<pre>{{ ingest_hint }}</pre>
+{% else %}
+<p class="muted">Платформа 1С не смонтирована. Семантический поиск справки sntx-sem заработает после монтирования <code>/opt/1cv8</code> и ingest.</p>
+{% endif %}
+{% if job.current %}
+<form method="post" action="/jobs/stop"><button>Остановить текущий прогон</button></form>
+{% endif %}
+{% endblock %}

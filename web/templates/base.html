@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}kuibysheff-1c-live{% endblock %}</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: "Segoe UI", sans-serif; margin: 0; line-height: 1.45; }
+    header { display: flex; gap: 1rem; align-items: center; padding: .8rem 1.2rem; border-bottom: 1px solid #8884; }
+    header a { text-decoration: none; }
+    main { max-width: 980px; margin: 0 auto; padding: 1.2rem; }
+    label { display: block; margin-top: .8rem; font-weight: 600; }
+    input[type=text], input[type=password], textarea, select { width: 100%; box-sizing: border-box; padding: .45rem; }
+    textarea { min-height: 12rem; font-family: inherit; }
+    button, .button { margin-top: .8rem; padding: .45rem .8rem; }
+    .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+    .ok { color: #0a7a32; } .bad { color: #b00020; }
+    .notice { background: #e7f6ec; color: #103; padding: .6rem .8rem; }
+    .error { background: #fde8e8; color: #300; padding: .6rem .8rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #8884; text-align: left; padding: .35rem .4rem; vertical-align: top; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #8882; padding: .8rem; }
+    .muted { opacity: .75; }
+  </style>
+</head>
+<body>
+<header>
+  <strong>kuibysheff-1c-live</strong>
+  <a href="/">Сервисы</a>
+  <a href="/settings">Настройки</a>
+  <a href="/configs">Конфигурации</a>
+  <a href="/tasks/new">Задача</a>
+  <a href="/runs">Прогоны</a>
+  {% if job.current %}
+  <a href="/jobs/{{ job.current.id }}">Идёт: {{ job.current.status }}</a>
+  {% elif job.queued %}
+  <span class="muted">в очереди: {{ job.queued|length }}</span>
+  {% endif %}
+</header>
+<main>
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>

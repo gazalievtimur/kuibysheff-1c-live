@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Прогон {{ job_id }}{% endblock %}
+{% block body %}
+<h1>Прогон {{ job_id }}</h1>
+<pre id="log"></pre>
+<form method="post" action="/jobs/stop"><button>Остановить</button></form>
+<p><a href="/runs">К списку прогонов</a></p>
+<script>
+const log = document.getElementById("log");
+const source = new EventSource("/jobs/{{ job_id }}/events");
+source.onmessage = (event) => {
+  log.textContent += JSON.parse(event.data) + "\n";
+  log.scrollTop = log.scrollHeight;
+};
+source.addEventListener("end", () => source.close());
+</script>
+{% endblock %}
