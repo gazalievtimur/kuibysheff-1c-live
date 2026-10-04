@@ -1,5 +1,7 @@
 # Docker
 
+Пошаговые команды сборки, проверки и разбор сбоев для агента: [docker-agent.md](docker-agent.md).
+
 Один образ `linux/amd64` содержит оркестратор, `kbshff`, code-index, 1c-sntx-sem, BSL Language Server, SearXNG, mcp-searxng и 1c-conf-doc. Портал на порту 8080 задаёт провайдера LLM, внешние эмбеддинги, конфигурацию 1С и свободный текст задачи.
 
 Локальные модели эмбеддингов в образ не входят. Индексация conf-doc и sntx-sem ходит во внешний OpenAI-compatible API и оплачивается по токенам.

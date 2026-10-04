@@ -85,7 +85,7 @@ oscript -encoding=utf-8 harness/run.os --dry-run
 
 Повторный запуск install продолжит с checkpoint (`.install-state.json`); `-Fresh` / `--fresh` — с нуля.
 
-Тот же стек одним Linux-контейнером с веб-порталом (выбор конфигурации, текст задачи, SearXNG, conf-doc, sntx-sem): [docs/docker.md](docs/docker.md).
+Тот же стек одним Linux-контейнером с веб-порталом (выбор конфигурации, текст задачи, SearXNG, conf-doc, sntx-sem): [docs/docker.md](docs/docker.md). Пошаговая установка для агента: [docs/docker-agent.md](docs/docker-agent.md).
 
 `run.cmd` / `run.sh` — live-eval gate `cfe-qty-check-01` (нужен ключ из `.env`). Весь банк: `-All` / `--all`. Канон без обёртки: `oscript -encoding=utf-8 harness/run.os`.
 
