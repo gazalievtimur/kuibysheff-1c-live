@@ -19,16 +19,14 @@ skill "platform_help" {
 }
 
 skill "code_index" {
-  policy: "Read/search CF dump to know objects under test. Every call must pass repo=cf. Do not invent symbols."
+  policy: "Read/search the CF dump to know objects under test. Call only tools from Available MCP tools. Arguments come from agent.describe_tool. Follow in/code-index-contract.md. Do not call code-index.search or code-index.get_file. A denied tool is absent; do not repeat it. Do not invent symbols."
   allowed_tools: [
-    "code-index.search",
     "code-index.find_symbol",
-    "code-index.get_file",
     "code-index.list_files",
-    "code_index.search",
-    "code_index.find_symbol",
-    "code_index.get_file",
-    "code_index.list_files"
+    "code-index.grep_code",
+    "code-index.grep_body",
+    "code-index.read_file",
+    "code-index.get_file_summary"
   ]
 }
 

@@ -12,16 +12,14 @@ skill "platform_help" {
 }
 
 skill "code_index" {
-  policy: "Verify against CF baseline. Every call must pass repo=cf. Read-only."
+  policy: "Verify against the CF baseline. Call only tools from Available MCP tools. Arguments come from agent.describe_tool. Follow in/code-index-contract.md. Do not call code-index.search or code-index.get_file. A denied tool is absent; do not repeat it. Read-only."
   allowed_tools: [
-    "code-index.search",
-    "code-index.get_file",
-    "code-index.list_files",
     "code-index.find_symbol",
-    "code_index.search",
-    "code_index.get_file",
-    "code_index.list_files",
-    "code_index.find_symbol"
+    "code-index.list_files",
+    "code-index.grep_code",
+    "code-index.grep_body",
+    "code-index.read_file",
+    "code-index.get_file_summary"
   ]
 }
 
@@ -41,4 +39,149 @@ skill "bsl_lint" {
     "bsl_language_server.analyze",
     "bsl_language_server.version"
   ]
+}
+
+skill "cfe-validate" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "cfe-diff" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "cf-validate" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "form-validate" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "epf-validate" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "erf-validate" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "epf-build" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "erf-build" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-create" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-dump-cf" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-dump-xml" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-load-cf" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-load-git" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-load-xml" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-update" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-run" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "db-list" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-config" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-configuration" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-dependencies" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-extensions" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-external" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-infobase" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-mcp" {
+  policy: "Read this skill with profile.read_skill. It maps REAL MCP servers in this profile (code-index, sntx_sem, bsl-language-server) and forbids inventing mcp-1c-platform-tools. Platform load/dump/run goes through db-*/cfe-*/epf-* scripts via home.run, not VS Code MCP tool names."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run", "code-index.find_symbol", "code-index.read_file", "code-index.get_file_summary", "sntx_sem.search_help", "sntx_sem.get_topic", "bsl-language-server.analyze"]
+}
+
+skill "1c-platform-tools-run" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-setversion" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-support" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
+}
+
+skill "1c-platform-tools-test" {
+  policy: "Read this skill with profile.read_skill before packaging or checking the tree. Run its python script with home.run program python. Do not invent attributes."
+  allowed_tools: ["home.list", "home.read", "home.write", "home.run"]
 }
